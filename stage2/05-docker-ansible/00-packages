@@ -1,0 +1,3 @@
+# Voraussetzungen für das Docker-Repository (01-run.sh) im Chroot
+ca-certificates
+curl

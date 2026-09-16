@@ -1,0 +1,15 @@
+# pi-gen-Konfiguration für Standalone-Nutzung (ohne Ansible-Rolle)
+# Werte ggf. anpassen; die Ansible-Rolle robot_pigen überschreibt diese
+# Datei mit einer gerenderten Vorlage (roles/robot_pigen/templates/config.j2).
+IMG_NAME='raspberrypi-trixie-custom'
+RELEASE='trixie'
+ARCH='arm64'
+DEPLOY_COMPRESSION='xz'
+export PIGEN_VARIANT='headless'
+# Nur Stage 0–2 bauen (Basis + Custom-Stages) und aus Stage 2 exportieren –
+# Stage 3–5 des arm64-Branches sind RPi-OS-Desktop-Varianten und
+# exportieren eigene Images (kein Bedarf für unser headless Image)
+export STAGE_LIST="${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2"
+ENABLE_SSH=1
+LOCALE_DEFAULT='de_DE.UTF-8'
+TIMEZONE_DEFAULT='Europe/Berlin'
