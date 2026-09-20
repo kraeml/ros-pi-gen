@@ -6,6 +6,10 @@ RELEASE='trixie'
 ARCH='arm64'
 DEPLOY_COMPRESSION='xz'
 export PIGEN_VARIANT='headless'
+# BASE_DIR setzen, falls unset (build-docker.sh sourced diese Datei mit set -u,
+# bevor build.sh BASE_DIR definiert; im Container setzt build.sh BASE_DIR=/pi-gen
+# vor dem Sourcing, daher greift der Fallback nur auf dem Host)
+export BASE_DIR="${BASE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # Nur Stage 0–2 bauen (Basis + Custom-Stages) und aus Stage 2 exportieren –
 # Stage 3–5 des arm64-Branches sind RPi-OS-Desktop-Varianten und
 # exportieren eigene Images (kein Bedarf für unser headless Image)
