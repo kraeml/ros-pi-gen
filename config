@@ -17,3 +17,8 @@ export STAGE_LIST="${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2"
 ENABLE_SSH=1
 LOCALE_DEFAULT='de_DE.UTF-8'
 TIMEZONE_DEFAULT='Europe/Berlin'
+# Regulierungsdomäne: DE nur als Build-Fallback (i. d. R. setzt der Pi-Imager
+# die Domäne zur Laufzeit). Ohne Wert würde pi-gens 02-net-tweaks das WLAN-
+# Radio per WirelessEnabled=false deaktivieren; AccessPopup würde es sonst
+# erst alle 2 Minuten reaktivieren. Überschreibbar per Umgebungsvariable.
+export WPA_COUNTRY="${WPA_COUNTRY:-DE}"

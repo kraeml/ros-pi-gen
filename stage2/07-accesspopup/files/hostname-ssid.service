@@ -1,0 +1,12 @@
+[Unit]
+Description=AccessPopup SSID aus Hostname ableiten (<hostname>-AP)
+After=NetworkManager.service cloud-config.service
+Before=multi-user.target
+ConditionPathExists=/etc/accesspopup.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hostname-ssid.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=ACPU Web Server for AccessPopup
+Requires=acpu_web_app.socket
+After=network.target
+Wants=acpu_web.service
+After=acpu_web.service
+
+[Service]
+User=acpu
+Group=acpu
+
+WorkingDirectory=/usr/local/bin/acpu_web/pages
+ExecStart=/usr/local/bin/acpu_web/venv/bin/uvicorn app:app --fd 3
+
+Restart=on-failure
+RestartSec=5
+
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

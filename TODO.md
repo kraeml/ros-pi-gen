@@ -67,7 +67,8 @@ ros-pi-gen/
 │   ├── EXPORT_IMAGE         # aus pi-gen stage2 übernehmen (Export aus diesem Stage)
 │   ├── 01-…04-…/            # Sub-Stages aus pi-gen stage2 (an gepinnten Commit gebunden)
 │   ├── 05-docker-ansible/   # eigen
-│   └── 06-variant/          # eigen (00-packages / 00-packages.desktop)
+│   ├── 06-variant/          # eigen (00-packages / 00-packages.desktop)
+│   └── 07-accesspopup/      # eigen (AccessPopup AP-Fallback + Web-UI)
 └── config                   # STAGE_LIST zeigt auf stage-custom
 ```
 
@@ -88,7 +89,7 @@ ros-pi-gen/
   **Sync-Prüfung** nötig (Checksum-/git-diff-Vergleich gegen den Commit,
   ggf. CI); `stage-custom` braucht `prerun.sh` + `EXPORT_IMAGE` aus pi-gen
 - **Randnotiz:** Sub-Stage-Erkennung (`for SUB_STAGE_DIR in
-  "${STAGE_DIR}"/*`) sortiert alphanumerisch — `01-…` bis `06-…` im
+  "${STAGE_DIR}"/*`) sortiert alphanumerisch — `01-…` bis `07-…` im
   gemeinsamen Dir ist äquivalent zum heutigen Zustand nach dem cp
 
 ### Idee c) git subtree (Vendoring)
@@ -159,42 +160,56 @@ anpassen — Locale, SSH, Docker-Repo, Ansible, eigene Pakete.
 
 ---
 
-## 2. AccessPopup-Ansible-Rolle – automatisches WLAN-/AccessPoint-Management
+## 2. AccessPopup – automatisches WLAN-/AccessPoint-Management
 
-Roboter bleibt ohne konfiguriertes WLAN erreichbar: AccessPopup aktiviert
-einen temporären AccessPoint, über den WLAN-Zugangsdaten gesetzt werden
-können.
+Status: **Umsetzungsplan v2.1 beschlossen** (Details, Architektur, Tests:
+[AccessPopup.md](AccessPopup.md), §8). Umsetzung: `stage2/07-accesspopup/`.
+
+**Umgesetzt:** temporärer AP, wenn kein bekanntes WLAN erreichbar; Konfiguration
+per AccessPopup-Web-UI (Port 8052, Dispatcher-gated – nur im AP-Fenster aktiv);
+Captive-Portal-Erkennung via DNS-Wildcard + nft-Redirect 80→8052; AP-Clients
+per nft isoliert (kein Internet/SSH/Docker/ROS); SSID `<hostname>-AP` (Hostname
+via Pi-Imager = Geräteidentität – keine Etiketten, MAC nicht ablesbar;
+Fallback `Roboter-AP`); einheitliches AP-Passwort `Pi-WLAN-Setup-2026`;
+`WPA_COUNTRY="${WPA_COUNTRY:-DE}"` in der config (Imager bleibt maßgeblich).
+AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
+(`stage2/07-accesspopup/files/VENDORED.md`).
 
 **Design-Entscheidung: Temporärer AccessPoint**
 
 - **Zweck:** der AP dient ausschließlich zur WLAN-Konfiguration
-- **Aktivierung:** nur, wenn kein WLAN konfiguriert ist
-- **Sicherheit:** Standard-Passwörter und -SSIDs sind akzeptabel, da der AP
-  nur bei fehlendem WLAN aktiviert wird
-- **Wichtig:** bei längerem Einsatz (>10 Minuten) müssen Passwort und
-  Firewall-Regeln angepasst werden
+- **Aktivierung:** nur, wenn kein bekanntes WLAN erreichbar ist
+- **Sicherheit:** einheitliches, bekanntes Passwort akzeptabel, da der AP nur
+  bei fehlendem WLAN aktiviert und per nft isoliert ist
+- **Wichtig:** bei längerem Einsatz (>10 Minuten) Passwort ändern und
+  Web-UI-Zugriff bedenken
 
 **Anforderungen**
 
 - Raspberry Pi (oder andere Linux-Systeme mit NetworkManager)
 - Unterstützte OS: PiOS Bookworm, Ubuntu 23.10, Arch Linux
 - WLAN-Interface (wlan0 oder wlan1)
-- Ansible 2.10+
 - Internet-Zugang (zum Herunterladen des Skripts)
 
 **Offene Fragen**
 
-- [ ] Lagerort der Rolle: eigenes Robot-Ansible-Repo vs. hier in ros-pi-gen
-- [ ] Provisioning-Pfad: build-time (eigene Stage) vs. runtime
-      (ansible-pull/cloud-init; Ansible dank `05-docker-ansible` bereits im
-      Image)
-- [ ] Zusammenspiel NetworkManager ↔ cloud-init ↔ AccessPopup
-      (Konfliktvermeidung bei Interface-Konfiguration)
-- [ ] Interface-Policy: wlan0/wlan1 vs. predictable interface names
-- [ ] Defaults für SSID/Passwort festlegen und dokumentieren
-- [ ] Firewall-Hardening für >10-min-Einsatz (nftables/ufw-Regeln)
-- [ ] Basis im Image: NetworkManager ist in `06-variant/00-packages`
+- [x] Zusammenspiel NetworkManager ↔ cloud-init ↔ AccessPopup
+      (cloud-init ohne Imager-Files schlafend; NM verwaltet Profile exklusiv,
+      AccessPopup schaltet nur per nmcli → kein Konflikt)
+- [x] Interface-Policy: `wlan0` (RPi-OS-Konvention), überschreibbar via
+      `/etc/accesspopup.conf` (`wdev0`)
+- [x] Defaults: SSID `<hostname>-AP`, Passwort `Pi-WLAN-Setup-2026`,
+      IP `192.168.50.5` (vorbelegt in `07-accesspopup/files/accesspopup.conf`)
+- [x] Basis im Image: NetworkManager ist in `06-variant/00-packages`
       (headless) bereits enthalten ✓
+- [x] AccessPoint per Browser einstellbar: AccessPopup-Web-UI + Captive-
+      Detection (Auto-Öffnen üblicher Clients; Fallback
+      `http://192.168.50.5:8052`)
+- [ ] QEMU-Smoke-Test erweitern (Block 3): Units enabled, Web-Units disabled,
+      `nft -c`-Syntax, First-Boot-SSID (Imager-Hostname → `roboter-07-AP`)
+- [ ] Hardware-Tests Gruppe A/B/C (Grundfunktion, Schul-/Heim-Wechsel,
+      Fehlerfälle) inkl. 2-Pi-Mehrgerätetest und Web-UI-Gating-Check
+      (AccessPopup.md §8.6)
 
 ---
 
@@ -202,7 +217,11 @@ können.
 
 - [ ] QEMU-Smoke-Test des gebauten Images (Headless-Boot in qemu-aarch64):
       Boot ohne Kernel-Panik, SSH-Port offen, cloud-init ok, Docker/Ansible
-      installiert
+      installiert; **erweitert durch Block 2** (Gruppe Q im
+      [Testprotokoll](Testprotokoll-AccessPopup.md)): AccessPopup.timer +
+      hostname-ssid.service enabled, Web-Units (acpu_web*) disabled,
+      accesspopup.conf-Inhalt, `nft -c`-Syntax, Dispatcher-Rechte,
+      visudo-Check, First-Boot-SSID → `<hostname>-AP`
 - [ ] Reproduzierbare Builds: apt-Snapshots (snapshot.debian.org),
       docker-ce-Version pinnen, Image-Benennung mit Datum +
       pi-gen-Commit-Kürzel

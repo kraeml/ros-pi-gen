@@ -2,9 +2,10 @@
 
 Eigenes arm64-Image für Raspberry Pi 3+/4/5 auf Basis von Debian Trixie mit
 Docker CE und Ansible. Dieses Repo enthält die pi-gen-Konfiguration (`config`)
-und eigene Stages (`stage2/05-docker-ansible`, `stage2/06-variant`), die als
-Overlay auf einen [pi-gen](https://github.com/RPi-Distro/pi-gen)-Checkout
-(arm64-Branch) gelegt werden.
+und eigene Stages (`stage2/05-docker-ansible`, `stage2/06-variant`,
+`stage2/07-accesspopup`), die als Overlay auf einen
+[pi-gen](https://github.com/RPi-Distro/pi-gen)-Checkout (arm64-Branch) gelegt
+werden.
 
 **Empfohlener Weg:** Build mit Docker — der `debian:trixie`-Container bringt
 Keyring, debootstrap und qemu aktuell mit, auf dem Host ist nur Docker Engine
@@ -38,15 +39,18 @@ cp /pfad/zum/ros-pi-gen/config config
 Was die beiden `cp`-Befehle bewirken:
 
 - **`stage2/*`:** legt die eigenen Sub-Stages in pi-gens `stage2/` ab —
-  `05-docker-ansible/` (Docker CE + Ansible) und `06-variant/` (Paketlisten
-  headless/desktop). Der Overlay-cp muss vor jeder Varianten-Änderung laufen,
+  `05-docker-ansible/` (Docker CE + Ansible), `06-variant/` (Paketlisten
+  headless/desktop) und `07-accesspopup/` (AccessPopup AP-Fallback + Web-UI).
+  Der Overlay-cp muss vor jeder Varianten-Änderung laufen,
   da er `06-variant/00-packages` neu anlegt (headless-Liste).
 - **`config`:** pi-gen versioniert `config` nicht (git-ignored) — der Befehl
   **erzeugt** sie neu (bzw. überschreibt eine alte). Inhalt: `IMG_NAME` (→
   Name des Work-Dir `work/<IMG_NAME>`), `RELEASE=trixie`, `ARCH=arm64`,
   `STAGE_LIST` (nur Stage 0–2, Export aus Stage 2), `ENABLE_SSH=1`,
-  `LOCALE_DEFAULT=de_DE.UTF-8`, `TIMEZONE_DEFAULT=Europe/Berlin` und
-  `PIGEN_VARIANT='headless'` (Default-Variante, siehe
+  `LOCALE_DEFAULT=de_DE.UTF-8`, `TIMEZONE_DEFAULT=Europe/Berlin`,
+  `WPA_COUNTRY` (Build-Fallback `DE`; zur Laufzeit setzt i. d. R. der
+  Pi-Imager die Regulierungsdomäne) und `PIGEN_VARIANT='headless'`
+  (Default-Variante, siehe
   [Variante wählen](#variante-wählen-headless-vs-desktop)).
 - **`stage2/06-variant/00-packages.desktop`** ist eine **inerte
   Master-Vorlage**: pi-gen liest ausschließlich Dateien namens `NN-packages`
@@ -178,6 +182,67 @@ cp /pfad/zum/ros-pi-gen/stage2/06-variant/00-packages stage2/06-variant/00-packa
 # und in pi-gen/config: export PIGEN_VARIANT='headless'
 ```
 
+## AccessPopup – WLAN-AP-Fallback mit Web-UI
+
+Stage `07-accesspopup` installiert [AccessPopup](https://github.com/RaspberryConnect/AccessPopup)
+(RaspberryConnect, gepinnter Commit `ba6eff1…`, Lizenz GPL-3.0, siehe
+`stage2/07-accesspopup/files/VENDORED.md`) **unverändert** und ergänzt
+projektspezifische Bausteine. AccessPopup bleibt für den AP↔WLAN-Wechsel
+zuständig (NetworkManager-AP-Modus, Prüfzyklus alle 2 Minuten, kein hostapd).
+
+**Verhalten:**
+
+- Kein bekanntes WLAN erreichbar (oder keins konfiguriert) → temporärer AP
+- Wieder ein bekanntes WLAN in Reichweite → Verbindung dorthin, AP schaltet ab
+- Schul-/Heim-WLAN koexistieren als NM-Profile (Schul-WLAN kommt per
+  Pi-Imager; Home-WLAN wird per Portal ergänzt)
+
+**Defaults (vorbelegt):**
+
+| Einstellung | Wert | Herkunft |
+|---|---|---|
+| AP-SSID | `<hostname>-AP` (z. B. `roboter-07-AP`), Fallback `Roboter-AP` | `hostname-ssid.service` leitet sie beim Boot aus dem Hostnamen ab (Hostname via Pi-Imager = Geräteidentität) |
+| AP-Passwort | `Pi-WLAN-Setup-2026` | vorbelegt in `files/accesspopup.conf` (Kursmaterial) |
+| AP-IP | `192.168.50.5` | `files/accesspopup.conf` |
+
+**Konfiguration per Browser (ohne CLI):**
+
+1. Mit der AP-SSID des eigenen Roboters verbinden
+2. Bei üblichen Clients (iOS/Android/Windows) öffnet sich das Portal
+   automatisch (DNS-Wildcard + Port-80-Redirect auf die Web-UI); sonst
+   manuell `http://192.168.50.5:8052` aufrufen
+3. „Add New WiFi Network" → WLAN wählen/SSID eingeben, Passwort setzen →
+   Profil wird via NetworkManager gespeichert → Seite timeoutet absichtlich:
+   **jetzt mit dem neuen WLAN verbinden**; der Pi wechselt im nächsten
+   Prüfzyklus (≤ 2 min) und der AP verschwindet
+
+**Web-UI nur im AP-Fenster:** die Web-Units (Port 8052) sind im Image
+deaktiviert und werden vom NM-Dispatcher
+(`/etc/NetworkManager/dispatcher.d/90-accesspopup-portal`) ausschließlich
+gestartet, während der AP aktiv ist – im Schul-/Heim-LAN ist die
+unauthentifizierte Oberfläche nicht erreichbar.
+
+**AP-Clients sind isoliert:** während der AP aktiv ist, lädt der Dispatcher
+eine nftables-Regelgruppe (Priorität vor NetworkManagers shared-NAT):
+AP-Clients dürfen nur DHCP, DNS, Portal (80/8052) und mDNS — kein Internet,
+kein SSH, kein Docker/ROS-Zugriff. Bei AP-Ende wird die Regelgruppe entfernt.
+
+**Betreiber-/Admin-Hinweise:**
+
+- Hostnamen ändern (z. B. über SSH): der NM-Dispatcher reagiert auf das
+  `hostname`-Event und setzt die AP-SSID neu (`<neuer-hostname>-AP`)
+- Dauer-AP erzwingen (z. B. um im laufenden WLAN ein weiteres Profil zu
+  setzen): `sudo accesspopup -a`, zurück mit `sudo accesspopup`
+- Passwort/SSID des AP ändern: `/etc/accesspopup.conf` (`ap_pw`/`ap_ssid`)
+  und bestehendes Profil löschen: `sudo nmcli con del AccessPopup` — beim
+  nächsten AP-Start wird das Profil mit den neuen Werten neu erzeugt
+- Lange AP-Nutzung (>10 min): Passwort ändern, Zugriff auf die unauthenti-
+  fizierte Web-UI bedenken
+
+**Bekannte Grenzen:** der AP↔WLAN-Wechsel unterbricht laufende SSH/VNC-
+Verbindungen; WLAN-Scan während aktivem AP ist je nach WLAN-Chip nicht
+möglich — die Web-UI bietet dann die manuelle SSID-Eingabe.
+
 ## Troubleshooting
 
 ### `E: Release signed by unknown key (key id 762F67A0B2C39DE4)` (nur nativer Weg)
@@ -232,11 +297,12 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 | `config` | pi-gen-Konfiguration (IMG_NAME, RELEASE=`trixie`, `PIGEN_VARIANT`, `STAGE_LIST`, `ENABLE_SSH`, Locale/Zeitzone) |
 | `stage2/05-docker-ansible/` | Docker (offizielles docker.com-Repository, Suite `trixie`) + Ansible + Werkzeuge |
 | `stage2/06-variant/` | Headless- (`00-packages`) vs. Desktop-Pakete (`00-packages.desktop`); `01-run.sh` aktiviert LightDM nur bei Desktop |
+| `stage2/07-accesspopup/` | AccessPopup (AP-Fallback, gepinnt `ba6eff1…`, GPL-3.0) + Web-UI + Captive-Redirect + nftables-Isolation + hostname-SSID; Details im [AccessPopup-Abschnitt](#accesspopup--wlan-ap-fallback-mit-web-ui) |
 
 ## Konventionen
 
 - **Nummerierung:** pi-gen liefert in `stage2/` bereits Sub-Stages `01-…`
-  bis `04-…`; die eigenen laufen danach als `05-` und `06-`.
+  bis `04-…`; die eigenen laufen danach als `05-`, `06-` und `07-`.
 - **`PIGEN_VARIANT` statt `VARIANT`:** console-setup (`setupcon`) nutzt
   `VARIANT` als Konfig-Suffix im Chroot — der Build bricht sonst an
   fehlenden `keyboard.headless`-Dateien. `PIGEN_VARIANT` wird von `config`

@@ -1,0 +1,5 @@
+iw
+dnsmasq-base
+nftables
+python3-venv
+python3-pip

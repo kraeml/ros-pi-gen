@@ -1,0 +1,9 @@
+[Unit]
+Description=Automatically generates an Access Point when a valid SSID is not in range
+After=multi-user.target
+Requires=network-online.target
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/accesspopup
+[Install]
+WantedBy=multi-user.target

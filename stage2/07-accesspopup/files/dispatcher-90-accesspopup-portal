@@ -1,0 +1,40 @@
+#!/bin/bash -e
+# NM-Dispatcher: orchestriert Web-UI, Firewall und Profil-Tweaks um den AP.
+# NM ruft Dispatcher-Skripte als root auf: $1=Interface, $2=Aktion,
+# env CONNECTION_ID. Dateirechte 0755, root, nicht gruppenschreibbar.
+# Muss schnell sein: nur systemctl/nft/nmcli-Modify, keine langen Läufe.
+# Der AP-Modus selbst bleibt in AccessPopup (Wechsel-Logik unverändert).
+
+AP_CON="AccessPopup"
+IFACE="${1:-}"
+ACTION="${2:-}"
+
+case "$ACTION" in
+    up)
+        [ "$CONNECTION_ID" = "$AP_CON" ] || exit 0
+        # AccessPopup kann das AP-Profil neu erzeugen -> Tweaks bei jedem
+        # 'up' erneut anwenden (IPv6 aus, kein Autoconnect, Reapply via modify)
+        nmcli connection modify "$AP_CON" \
+            ipv6.method disabled connection.autoconnect no >/dev/null 2>&1 || true
+        # Captive-Portal: Web-UI + Port-80-Redirect nur im AP-Fenster
+        systemctl start acpu_web.service acpu_web_app.socket >/dev/null 2>&1 || true
+        nft -f /etc/nftables.d/accesspopup.rules >/dev/null 2>&1 || true
+        ;;
+    down)
+        [ "$CONNECTION_ID" = "$AP_CON" ] || exit 0
+        systemctl stop acpu_web.service acpu_web_app.socket acpu_web_app.service \
+            >/dev/null 2>&1 || true
+        nft delete table ip accesspopup >/dev/null 2>&1 || true
+        nft delete table ip6 accesspopup >/dev/null 2>&1 || true
+        ;;
+    hostname)
+        # Hostnamenwechsel: SSID neu bilden; falls AP aktiv, neu aufsetzen
+        /usr/local/sbin/hostname-ssid.sh || true
+        if nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null \
+            | grep -q "^${AP_CON}:"; then
+            nmcli connection down "$AP_CON" >/dev/null 2>&1 || true
+            nmcli connection up "$AP_CON" >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+exit 0

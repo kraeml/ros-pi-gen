@@ -1,0 +1,9 @@
+[Unit]
+Description=accesspopup network checks every 2 mins
+
+[Timer]
+OnBootSec=0min
+OnCalendar=*:0/2
+
+[Install]
+WantedBy=timers.target

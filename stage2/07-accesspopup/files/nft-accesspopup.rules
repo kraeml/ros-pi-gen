@@ -1,0 +1,37 @@
+#!/usr/sbin/nft -f
+# AccessPopup-AP: Isolation der AP-Clients + Captive-Redirect.
+# Wird vom NM-Dispatcher (90-accesspopup-portal) nur während aktivem AP
+# geladen und beim AP-Stop vollständig wieder entfernt.
+# Prioritäten < 0 greifen VOR den NetworkManager-shared-Regeln (nm-shared-*)
+# und dem regulären Firewall-Setup -> AP-Clients haben kein Internet, kein
+# SSH, keinen Docker-/ROS-Zugriff; nur DHCP/DNS/Portal/mDNS erlaubt.
+
+table ip accesspopup {
+    chain prerouting {
+        type nat hook prerouting priority -110; policy accept;
+        iifname "wlan0" tcp dport 80 redirect to :8052
+    }
+    chain input {
+        type filter hook input priority -150; policy accept;
+        iifname "wlan0" udp dport 67 accept comment "AP: DHCP (Client-Quelle 0.0.0.0)"
+        iifname "wlan0" ip saddr 192.168.50.0/24 udp dport 53 accept comment "AP: DNS"
+        iifname "wlan0" ip saddr 192.168.50.0/24 tcp dport { 80, 8052 } accept comment "AP: Portal"
+        iifname "wlan0" ip saddr 192.168.50.0/24 udp dport 5353 accept comment "AP: mDNS"
+        iifname "wlan0" drop comment "AP: kein SSH/Docker/ROS/lokale Dienste"
+    }
+    chain forward {
+        type filter hook forward priority -150; policy accept;
+        iifname "wlan0" drop comment "AP: kein Internet/Ethernet/Docker (NAT-Nutzung blockiert)"
+    }
+}
+
+table ip6 accesspopup {
+    chain input {
+        type filter hook input priority -150; policy accept;
+        iifname "wlan0" drop
+    }
+    chain forward {
+        type filter hook forward priority -150; policy accept;
+        iifname "wlan0" drop
+    }
+}

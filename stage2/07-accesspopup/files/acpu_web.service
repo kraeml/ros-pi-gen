@@ -1,0 +1,30 @@
+[Unit]
+Description=AccessPopup Webpage background actions script
+After=network.target
+
+[Service]
+Type=simple
+
+# Run as the restricted user
+User=acpu
+Group=acpu
+
+# Run Backend Script
+ExecStart=/usr/local/bin/acpu_web/venv/bin/python3 /usr/local/bin/acpu_web/acpu_get_std.py
+
+# Restart on failure
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+
+#Working dir
+WorkingDirectory=/usr/local/bin
+
+#Security
+ProtectSystem=full
+ReadWritePaths=/etc/accesspopup.conf
+ReadOnlyPaths=/usr/local/bin/acpu_web
+
+[Install]
+WantedBy=multi-user.target

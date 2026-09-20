@@ -1,0 +1,8 @@
+[Unit]
+Description=Socket for AccessPopup Webpage actions script
+
+[Socket]
+ListenStream=0.0.0.0:8052
+
+[Install]
+WantedBy=sockets.target
