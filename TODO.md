@@ -249,6 +249,22 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       `test_hostname_ssid`) laufen ohne Docker/Image und wären günstig in
       CI abbildbar; Docker-/Image-Tests (Q1a, Q2–Q9, `test_extras_*`)
       brauchen einen Runner mit Docker + arm64-binfmt
+- [ ] Dev-Build-Workflow dokumentieren: schnelle Iteration über pi-gens
+      eigenen Mechanismus (pi-gen-README „Skipping stages to speed up
+      development") statt Vollbuild — `SKIP`-Dateien in bereits gebauten
+      Stages/Sub-Stages (liegen im pi-gen-Clone, gehören nicht ins
+      Overlay-Repo), dann `PRESERVE_CONTAINER=1 CONTINUE=1
+      ./build-docker.sh` (nativ: einfach ohne `CLEAN=1`); `SKIP_IMAGES`
+      spart den Image-Export während der Iteration.
+      **Korrektur zur Ursprungsidee:** Ansible wird in
+      `stage2/05-docker-ansible` installiert, nicht in „stage5" —
+      `stage5` gibt es nur im upstream-pi-gen (LibreOffice/Extras) und
+      wird von ros-pi-gen nicht gebaut (`STAGE_LIST` nur bis stage2).
+      Timing-Beleg aus dem Build-Log vom 20.09. (`build-docker.log`):
+      `05-docker-ansible` ≈ 23,5 min von ~94 min Gesamt — wer nur an
+      `06-variant`/`07-accesspopup` iteriert, spart so rund 2/3 der
+      Bauzeit. Vollbuild bleibt als periodischer Verifizierungsschritt
+      nötig (Drift-Erkennung), danach Testinfra-Lauf
 
 ---
 
@@ -257,7 +273,17 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 - [ ] ROS 2 im Image: eigene Stage (`07-ros2`) vs. Runtime-Provisioning
       (Bezug Robotic-ROS2/`ugv_ws`); Größen-/Versionsfrage klären
 - [ ] Ansible-Strategie: build-time (heute) vs. ansible-pull/cloud-init
-      zur Laufzeit
+      zur Laufzeit. Konkretes Beispiel aus rpi-robot-base prüfen: die
+      fertige Rolle `robot_codeserver`
+      (`../rpi-robot-base/provisioning/ansible/roles/robot_codeserver` —
+      code-server-Download (.deb), systemd-User-Unit, Config-Template,
+      deutsches Sprachpaket) nutzt das im Image vorhandene Ansible
+      (`05-docker-ansible`) zur Nach-Boot-Provisionierung — damit lassen
+      sich solche Zusätze nach dem Image-Build installieren, ohne eine
+      eigene Build-Stage. Achtung: die Rolle braucht einen existierenden
+      Benutzer (Home-Dir, systemd --user) — hängt am First-User-Problem
+      (Punkt „First-User/SSH-Defaults" oben); im Chroot zur Build-Zeit
+      gibt es den Benutzer nicht
 - [ ] First-User/SSH-Defaults: `FIRST_USER_PASS` +
       `DISABLE_FIRST_BOOT_USER_RENAME=1` (+ `PUBKEY_SSH_FIRST_USER`) in der
       config setzen, damit `usermod -aG docker`
