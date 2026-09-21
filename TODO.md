@@ -241,6 +241,14 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       (Wert noch festlegen, z. B. 2 GB unkomprimiert)
 - [ ] Build-Metriken (Dauer, Image-Größe) pro Lauf sammeln für
       Regressionserkennung
+- [ ] `tests/requirements.txt` pinnen (aktuell nur `pytest>=7.0`, kein
+      Upper-Bound) — Testläufe sind sonst nicht reproduzierbar, wenn pytest
+      ein Breaking-Release bringt; ggf. `pip-compile`/Lock-Datei einführen
+- [ ] CI-Pipeline für ros-pi-gen selbst fehlt (kein `.gitlab-ci.yml`, kein
+      `.github/workflows/`) — mind. Lint/Overlay-Checks (`test_overlay_*`,
+      `test_hostname_ssid`) laufen ohne Docker/Image und wären günstig in
+      CI abbildbar; Docker-/Image-Tests (Q1a, Q2–Q9, `test_extras_*`)
+      brauchen einen Runner mit Docker + arm64-binfmt
 
 ---
 
@@ -255,6 +263,13 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       config setzen, damit `usermod -aG docker`
       (`05-docker-ansible/03-run.sh`) bereits im Build greift (siehe
       README, „Erster Benutzer")
+- [ ] `config`-Kommentar zur Ansible-Rolle `robot_pigen` klären: verweist
+      auf `roles/robot_pigen/templates/config.j2`, die Rolle existiert
+      aber (Stand heute) in `rpi-robot-base` nicht und ist dort auch nicht
+      als Ticket/Idee verankert (Backlog geprüft, kein Treffer). Entweder
+      Integration mit rpi-robot-base konkret planen und dort ein Ticket
+      anlegen, oder Kommentar in `config` präzisieren, damit er nicht wie
+      eine bereits existierende Automatisierung wirkt
 
 ---
 
@@ -268,3 +283,20 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       existieren nicht mehr im Repo (die pi-gen-README ist online).
 - [ ] Branch-/Tag-Konvention festlegen (z. B. `main`, Tags je
       Image-Version)
+- [x] `.venv` für die Testinfra: eigenständiges venv im Repo-Root
+      (`ros-pi-gen/.venv`, `python3 -m venv .venv` + `pip install -r
+      tests/requirements.txt`) statt Abhängigkeit vom Workspace-Root-venv;
+      `tests/run_tests.sh` sucht jetzt standardmäßig dort
+      (`PIGEN_TEST_VENV` überschreibt weiterhin), `.gitignore` ergänzt.
+- [ ] Einstiegs-Tooling auf Root-Ebene fehlt noch (kein `Makefile`, kein
+      `setup.sh`): venv-Anlage ist aktuell ein manueller Schritt
+      (`python3 -m venv .venv && .venv/bin/pip install -r
+      tests/requirements.txt`). Ein `make venv`/`make test`-Pattern nach
+      Vorbild `rpi-robot-base/Makefile` (Variable `VENV`, `guard-venv`,
+      `venv`-Target mit Datei-Abhängigkeit) würde Setup + Overlay-cp +
+      Build-Aufruf konsolidieren (siehe auch Block 1, Idee a)
+- [ ] `tests/.work/`-Cache wächst unkontrolliert (aktuell ~12 GB: entpackte
+      Images, RootFS-Staging) und wird nur manuell per
+      `PIGEN_TEST_CLEAN=1`/`--clean-cache` geleert. Automatischen Cleanup
+      ergänzen (z. B. Anzahl-/Alterslimit für alte
+      `image_*`-Cache-Verzeichnisse beim Testlauf)

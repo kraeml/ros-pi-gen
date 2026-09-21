@@ -259,7 +259,7 @@ Unter `tests/` automatisiert eine pytest-Suite die Gruppe Q des
    SSH — Q6 (`nft -c`) am echten bcm-Kernel.
 
 ```bash
-../.venv/bin/python -m pytest tests     # oder: tests/run_tests.sh
+.venv/bin/python -m pytest tests     # oder: tests/run_tests.sh
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh        # Hardware-Lauf
 ```
 

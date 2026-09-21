@@ -10,7 +10,9 @@ Q1–Q9 final am Pi). Die Gruppen A–D bleiben manuell; `pi-state.sh` und
 ## Schnellstart
 
 ```bash
-# venv am Workspace-Root wird von run_tests.sh automatisch gefunden
+# venv im Repo-Root einmalig anlegen (falls noch nicht vorhanden)
+python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
+
 ./run_tests.sh                    # Build-Host-Ebene: Q0 + Q1a + Q2–Q9 + Manifest
 ./run_tests.sh -k q5              # einzelner Test
 ./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vorher leeren
@@ -19,8 +21,10 @@ Q1–Q9 final am Pi). Die Gruppen A–D bleiben manuell; `pi-state.sh` und
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
 ```
 
-`run_tests.sh` installiert `requirements.txt` idempotent in die venv und ruft
-pytest auf. Alternativ: `.venv/bin/python -m pytest tests`.
+`run_tests.sh` findet die venv automatisch unter `ros-pi-gen/.venv`
+(überschreibbar mit `PIGEN_TEST_VENV`), installiert `requirements.txt`
+idempotent darin und ruft pytest auf. Alternativ direkt:
+`../.venv/bin/python -m pytest .` (Aufruf aus `tests/`).
 
 ## Voraussetzungen (Build-Host-Ebene)
 
@@ -127,7 +131,7 @@ echter Kernel, echte Peripherie.
 | `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen |
 | `PIGEN_TEST_BOOT_TIMEOUT` | `900` | Q1a: Sekunden bis systemd-Zustand |
 | `PIGEN_TEST_DOCKER_TIMEOUT` | `300` | Timeout je Container-Kommando |
-| `PIGEN_TEST_VENV` | `<workspace>/.venv` | venv für run_tests.sh |
+| `PIGEN_TEST_VENV` | `ros-pi-gen/.venv` | venv für run_tests.sh |
 
 ## Wartung
 
