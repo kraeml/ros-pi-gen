@@ -264,7 +264,15 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       `05-docker-ansible` ≈ 23,5 min von ~94 min Gesamt — wer nur an
       `06-variant`/`07-accesspopup` iteriert, spart so rund 2/3 der
       Bauzeit. Vollbuild bleibt als periodischer Verifizierungsschritt
-      nötig (Drift-Erkennung), danach Testinfra-Lauf
+      nötig (Drift-Erkennung), danach Testinfra-Lauf.
+      **Validiert 2026-09-21:** Nur-06-variant-Lauf in ~1:44 min statt
+      ~94 min — SKIP-Dateien (im pi-gen-Clone gitignored), RootFS-Seed
+      aus `tests/.work` (3,1 GB, enthält ansible + aktuelle apt-Listen),
+      `PRESERVE_CONTAINER=1` + `PIGEN_DOCKER_OPTS`-Mounts für `work/`/
+      `deploy/` (dauerhaft auf dem Host). Rezept:
+      [Ansible-im-Build.md](Ansible-im-Build.md). Achtung:
+      `build-docker.sh` überschreibt `deploy/build-docker.log` bei jedem
+      Lauf — der Vollbuild-Log vom 20.09. wurde dadurch ersetzt
 
 ---
 
@@ -283,7 +291,11 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       eigene Build-Stage. Achtung: die Rolle braucht einen existierenden
       Benutzer (Home-Dir, systemd --user) — hängt am First-User-Problem
       (Punkt „First-User/SSH-Defaults" oben); im Chroot zur Build-Zeit
-      gibt es den Benutzer nicht
+      gibt es den Benutzer nicht. **Experiment bestätigt (2026-09-21):**
+      ansible-Smoke-Test im Build-Chroot liefert `ping: pong`
+      (ansible-core 2.19, python3.13 auto-erkannt, Schritt ~77 s unter
+      qemu); Details, Rezept und Grenzen:
+      [Ansible-im-Build.md](Ansible-im-Build.md)
 - [ ] First-User/SSH-Defaults: `FIRST_USER_PASS` +
       `DISABLE_FIRST_BOOT_USER_RENAME=1` (+ `PUBKEY_SSH_FIRST_USER`) in der
       config setzen, damit `usermod -aG docker`
