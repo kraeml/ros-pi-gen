@@ -9,6 +9,3 @@ if [ "${PIGEN_VARIANT}" = "desktop" ]; then
 systemctl enable lightdm.service
 EOF
 fi
-on_chroot << EOF
-ansible -i localhost, -m ping -c local localhost
-EOF
