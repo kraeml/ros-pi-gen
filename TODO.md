@@ -205,23 +205,35 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 - [x] AccessPoint per Browser einstellbar: AccessPopup-Web-UI + Captive-
       Detection (Auto-Öffnen üblicher Clients; Fallback
       `http://192.168.50.5:8052`)
-- [ ] QEMU-Smoke-Test erweitern (Block 3): Units enabled, Web-Units disabled,
-      `nft -c`-Syntax, First-Boot-SSID (Imager-Hostname → `roboter-07-AP`)
+- [x] QEMU-Smoke-Test erweitert, Strategie in drei Ebenen umgesetzt:
+      **Build-Log-Prüfung** (Q0: Stages vollständig, kein `Skip`,
+      docker-ce/ansible-Beleg), **Image-Inhalt** (Datei-Manifest per debugfs,
+      Q1a Container-Boot, Q2–Q9 im arm64-Container) und **reale Hardware**
+      (`tests/tools/pi-smoke.sh`, Gruppe Q final am Pi inkl. Q6 am bcm-Kernel).
+      Ein echter QEMU-Kernel-Boot-Test (raspi3b, qemu 6.2) wurde nach
+      tragfähiger Diagnose **abgebrochen** — Befunde (BT-serdev vs.
+      `/dev/console`, `bcm2835_powermgt`-Reset, qemu-user-Spawn-Limits):
+      [tests/README.md](tests/README.md), Abschnitt „Warum kein QEMU“.
+      Erste Läufe deckten echte Defekte auf: fehlendes Exec-Bit an
+      `07-accesspopup/01-run.sh` (pi-gen skippte die Stage still) und ein
+      daran hängender veralteter Image-Stand im deploy.
 - [ ] Hardware-Tests Gruppe A/B/C (Grundfunktion, Schul-/Heim-Wechsel,
       Fehlerfälle) inkl. 2-Pi-Mehrgerätetest und Web-UI-Gating-Check
-      (AccessPopup.md §8.6)
+      (AccessPopup.md §8.6); Beobachtungs-Helfer:
+      `tests/tools/pi-smoke.sh` (mit Pass/Fail) und `tools/pi-state.sh`
 
 ---
 
 ## 3. Build-/CI-Härtung
 
-- [ ] QEMU-Smoke-Test des gebauten Images (Headless-Boot in qemu-aarch64):
-      Boot ohne Kernel-Panik, SSH-Port offen, cloud-init ok, Docker/Ansible
-      installiert; **erweitert durch Block 2** (Gruppe Q im
-      [Testprotokoll](Testprotokoll-AccessPopup.md)): AccessPopup.timer +
-      hostname-ssid.service enabled, Web-Units (acpu_web*) disabled,
-      accesspopup.conf-Inhalt, `nft -c`-Syntax, Dispatcher-Rechte,
-      visudo-Check, First-Boot-SSID → `<hostname>-AP`
+- [x] QEMU-Smoke-Test des gebauten Images: umgesetzt als Container-Boot
+      (Q1a, systemd im arm64-RootFS) + Build-Log-/Manifest-Prüfungen
+      (Q0e–g, `test_image_files`); cloud-init- und Docker/Ansible-Checks in
+      `test_extras_*`. Der echte Kernel-Boot-Check läuft an der Hardware
+      (`pi-smoke.sh`, Q1) — QEMU-Vollsystem unter qemu 6.2 war nicht
+      tragfähig (siehe [tests/README.md](tests/README.md), „Warum kein QEMU“).
+      Details Block 2 ([Testprotokoll](Testprotokoll-AccessPopup.md),
+      Gruppe Q).
 - [ ] Reproduzierbare Builds: apt-Snapshots (snapshot.debian.org),
       docker-ce-Version pinnen, Image-Benennung mit Datum +
       pi-gen-Commit-Kürzel
@@ -248,8 +260,11 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 
 ## 5. Repo-Hygiene
 
-- [ ] `.gitignore` in ros-pi-gen ergänzen: `work/`, `deploy/`, `build.log`
-- [ ] `Fehlermeldungen.md` und `README von pi-gen.md` nach `docs/`
-      verschieben (oder löschen; die pi-gen-README ist online)
+- [x] `.gitignore` in ros-pi-gen ergänzt: `tests/.work/`, `__pycache__/`,
+      `.pytest_cache/`. Der vorgesehene Teil `work/`, `deploy/`, `build.log`
+      entfällt — solche Dateien entstehen im ros-pi-gen-Repo nicht (Builds
+      laufen im pi-gen-Clone, dessen `.gitignore` das abdeckt).
+- [x] `Fehlermeldungen.md` und `README von pi-gen.md` — entfällt: die Dateien
+      existieren nicht mehr im Repo (die pi-gen-README ist online).
 - [ ] Branch-/Tag-Konvention festlegen (z. B. `main`, Tags je
       Image-Version)

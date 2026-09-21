@@ -18,11 +18,16 @@ ein Test gilt erst als bestanden, wenn „Erwartet" eingetreten ist **und**
 
 ---
 
-## Gruppe Q – QEMU-Smoke-Test (Build-Host, vor dem Flashen)
+## Gruppe Q – Smoke-Tests (Build-Host vor dem Flashen; final am Gerät)
+
+Automatisiert in `tests/` (Build-Log, Datei-Manifest, Container-Boot:
+`tests/run_tests.sh`) und am Gerät (`tests/tools/pi-smoke.sh`); Details,
+Grenzen und der Rückbau des QEMU-Kernel-Boot-Tests:
+[tests/README.md](tests/README.md).
 
 | # | Testfall | Erwartet | Beobachtet | OK |
 |---|---|---|---|---|
-| Q1 | Image bootet in qemu-aarch64 | Kein Kernel-Panik, Login/SSH erreichbar | | ☐ |
+| Q1 | Image bootet (Q1a Container-Boot am Build-Host; Boot-Beleg am Gerät via `pi-smoke.sh`) | Kein Kernel-Panik, Login/SSH erreichbar | | ☐ |
 | Q2 | `systemctl is-enabled AccessPopup.timer` | `enabled` | | ☐ |
 | Q3 | `systemctl is-enabled hostname-ssid.service` | `enabled` | | ☐ |
 | Q4 | `systemctl is-enabled acpu_web.service acpu_web_app.socket` | **nicht** enabled (Dispatcher-Gating) | | ☐ |
@@ -92,7 +97,7 @@ Voraussetzung: kein WLAN gespeichert (frisches Image, Imager nur für Hostname).
 
 | Gruppe | Bestanden | Anmerkungen |
 |---|---|---|
-| Q – QEMU | ☐ | |
+| Q – Smoke | ☐ | |
 | A – Grundfunktion | ☐ | |
 | B – Schul-/Heim-Wechsel | ☐ | |
 | C – Fehlerfälle | ☐ | |

@@ -77,7 +77,10 @@ Nützliche Varianten (dokumentiert in der pi-gen-README):
   --volumes-from=pigen_work pi-gen /bin/bash`)
 - `docker rm -v pigen_work` – alten Container aufräumen
 
-Das fertige Image samt `build-docker.log` landet in `deploy/`. Flashen per
+Das fertige Image samt `build-docker.log` landet in `deploy/`. Der
+Deploy-Dateiname folgt `image_<Datum>-<IMG_NAME><IMG_SUFFIX>`; `IMG_SUFFIX`
+(optional, per Env, z. B. `-lite` für die Headless-Kennzeichnung) geht nicht
+aus der `config` hervor und muss beim Build ggf. gesetzt werden. Flashen per
 Raspberry Pi Imager (**Use custom**) oder `dd`/`balenaEtcher`.
 
 ## Nativer Build (ohne Docker)
@@ -242,6 +245,28 @@ kein SSH, kein Docker/ROS-Zugriff. Bei AP-Ende wird die Regelgruppe entfernt.
 **Bekannte Grenzen:** der AP↔WLAN-Wechsel unterbricht laufende SSH/VNC-
 Verbindungen; WLAN-Scan während aktivem AP ist je nach WLAN-Chip nicht
 möglich — die Web-UI bietet dann die manuelle SSID-Eingabe.
+
+## Testinfra (Gruppe Q automatisiert)
+
+Unter `tests/` automatisiert eine pytest-Suite die Gruppe Q des
+[Abnahmeprotokolls](Testprotokoll-AccessPopup.md) in drei Ebenen:
+
+1. **Build-Log** (Q0): Commit gepinnt, alle Stages gelaufen (kein `Skip`),
+   docker-ce/ansible-Installation belegbar.
+2. **Image-Inhalt** (Datei-Manifest + Q1a, Q2–Q9): Dateien per debugfs direkt
+   im Image, Container-Boot, Unit-States, conf/nft/visudo/Dispatcher.
+3. **Hardware** (`tests/tools/pi-smoke.sh`): Gruppe Q final am echten Pi per
+   SSH — Q6 (`nft -c`) am echten bcm-Kernel.
+
+```bash
+../.venv/bin/python -m pytest tests     # oder: tests/run_tests.sh
+ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh        # Hardware-Lauf
+```
+
+Details, Grenzen und die Begründung zum verworfenen QEMU-Kernel-Boot-Test:
+[tests/README.md](tests/README.md). Nach jedem Rebuild ausführen; solange
+das Image die Stage nicht enthält, schlagen Q2–Q9 mit Verweis auf den nötigen
+Rebuild fehl (beabsichtigt).
 
 ## Troubleshooting
 

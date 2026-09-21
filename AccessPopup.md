@@ -231,6 +231,15 @@ NM-Start, AP, Scan, Skriptlauf, Web-Units-enable.
 
 ### 8.6 Tests
 
+> **Nachtrag 2026-09-21:** der QEMU-Smoke-Test (Vollsystem-Boot in
+> qemu-aarch64) wurde nach tragfähiger Diagnose abgebrochen und durch drei
+> Ebenen ersetzt: Build-Log-Prüfung, Datei-Manifest + Container-Boot
+> (`tests/run_tests.sh`) und Gruppe Q final am echten Gerät
+> (`tests/tools/pi-smoke.sh`). Befunde und Grenzen (u. a. BT-serdev vs.
+> `/dev/console`, `bcm2835_powermgt`-Maschinen-Reset in qemu 6.2):
+> [tests/README.md](tests/README.md), Abschnitt „Warum kein QEMU“.
+> Die Liste unten ist der ursprüngliche Plan (Historie).
+
 - **QEMU-Smoke:** Units enabled (`AccessPopup.timer`, `hostname-ssid.service`), Web-Units **disabled**, conf-Inhalt, `nft -c`-Syntax, Dispatcher-Rechte, First-Boot-SSID (Imager-Hostname → `roboter-07-AP`)
 - **Hardware A:** Boot ohne WLAN → SSID `<hostname>-AP` → Captive-Portal öffnet / Fallback `http://192.168.50.5:8052` → Heim-WLAN einrichten → AP verschwindet
 - **Hardware B:** Schul-WLAN via Imager + eigener Hostname → Heim-WLAN per Portal → beide Profile gleichzeitig gespeichert → automatischer Wechsel Schul↔Zuhause
