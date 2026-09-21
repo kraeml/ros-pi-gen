@@ -285,6 +285,126 @@ localhost | SUCCESS => {
   interaktiv austesten; Systemzustand im Chroot direkt inspizieren
   (dpkg, services-Symlinks, NM-Profile …)
 
+### 6.4 Häufige Falle: Container-Exec ≠ Chroot-Exec
+
+Der naheliegende Einzeiler **scheitert** (so geschehen 2026-09-21):
+
+```bash
+sudo docker run -it --privileged --volumes-from=pigen_work \
+  pi-gen ansible --version
+# docker: … exec: "ansible": executable file not found in $PATH
+```
+
+Grund: `ansible` wird im **Build-Container** (debian:trixie,
+Werkzeugkasten — dort gibt es kein Ansible) gesucht, nicht im
+**Ziel-RootFS**. Ansible liegt hinter der Chroot-Ebene
+(`work/…/rootfs/usr/bin/ansible`). Zwei korrekte Muster:
+
+- **Ein Kommando, nicht-interaktiv** — `echo … | on_chroot` statt
+  `on_chroot ansible …`: `on_chroot` übergibt Rest-Args an
+  `bash -e` (capsh: „remaining arguments are for /bin/bash“), ein
+  Binär-Aufruf würde als „Shell-Skript“ interpretiert. pi-gens
+  kanonischer Weg ist das stdin-Muster:
+
+  ```bash
+  docker run --rm --privileged -i --volumes-from=pigen_work pi-gen \
+    /bin/bash -c 'cd /pi-gen && \
+      export BASE_DIR=/pi-gen ROOTFS_DIR=/pi-gen/work/raspberrypi-trixie-custom/stage2/rootfs \
+      CAPSH_ARG="--drop=cap_setfcap" LOG_FILE=/tmp/m.log && \
+      mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc || true; \
+      . scripts/common && echo "ansible --version" | on_chroot'
+  ```
+
+- **Interaktiv** — §6.1: Login, `on_chroot`, dann erst am Chroot-Prompt
+  `ansible --version` ausführen.
+
+## 7. Playbook-Test im Chroot (2026-09-21, verifiziert)
+
+Vom Ping (§4, §6) zum echten `ansible-playbook`: Ein Stub-Playbook
+(nur `ansible.builtin`-Module, keine Collections-Abhängigkeiten) im
+Chroot ausgeführt — **`ok=6, changed=1, failed=0`**, Fakten belegen den
+Kontext: `arch=aarch64, python=3.13.5`.
+
+### 7.1 Rezept (gepipete Variante)
+
+Innerhalb der Debug-Container-Session (§6.2-Aufbau: binfmt-Probe,
+`scripts/common` sourcen, Env setzen) vor dem `on_chroot`-Aufruf das
+Playbook ins RootFS schreiben und ausführen:
+
+```bash
+mkdir -p "$ROOTFS_DIR/root/pb-test"
+cat > "$ROOTFS_DIR/root/pb-test/playbook.yml" <<'PBEOF'
+---
+- name: Chroot-Playbook-Smoke-Test
+  hosts: all
+  connection: local
+  gather_facts: true
+  tasks:
+    - name: Debug-Kontext
+      ansible.builtin.debug:
+        msg: "arch={{ ansible_facts.architecture }} python={{ ansible_facts.python_version }}"
+    - name: apt no-op (bash bereits installiert)
+      ansible.builtin.apt:
+        name: bash
+        state: present
+    - name: Testdatei schreiben
+      ansible.builtin.copy:
+        content: "chroot-playbook-test\n"
+        dest: /root/pb-test-marker.txt
+        mode: "0644"
+    - name: Datei verifizieren
+      ansible.builtin.stat:
+        path: /root/pb-test-marker.txt
+      register: marker
+    - name: Ergebnis behaupten
+      ansible.builtin.assert:
+        that: marker.stat.exists
+PBEOF
+
+on_chroot <<'CHEOF'
+ansible-playbook -i localhost, -c local /root/pb-test/playbook.yml
+CHEOF
+```
+
+### 7.2 Regeln und Grenzen
+
+- **Persistenter Pfad, nicht `/tmp`:** `on_chroot` mountet tmpfs über
+  `/tmp` — vor dem Aufruf abgelegte Dateien wären im Chroot unsichtbar.
+  Playbooks nach `$ROOTFS_DIR/root/…` legen (überlebt den
+  Container-Neustart, da `work/` auf dem Host liegt).
+- **RootFS-Hygiene (wichtig):** Test-Artefakte im RootFS landen im
+  Image, wenn ein späterer Lauf ohne `CLEAN` weiterbaut. Nach jedem
+  Experiment entfernen — inkl. `/root/.ansible` (root-owned, am
+  einfachsten im Container löschen:
+  `docker run --rm --privileged --volumes-from=pigen_work pi-gen
+  rm -rf /pi-gen/work/…/rootfs/root/.ansible`); im Chroot erzeugte
+  `.bash_history` ebenfalls.
+- **Chroot-sichere Teilmengen:** Module ohne laufendes systemd und ohne
+  Benutzerkontext funktionieren (debug, apt, copy, stat, assert,
+  `systemctl enable` über chroot-sichere Wrapper); alles mit
+  `state=started`, `systemd --user`, Home-Verzeichnissen oder
+  Netzwerkdiensten gehört in die Laufzeit-Provisionierung (§5,
+  `robot_codeserver` als Beispiel). Das vollständige
+  `playbook.yml` aus rpi-robot-base ist im Chroot **nicht** lauffähig
+  — es scheitert an mehreren Rollen (User/systemd).
+- **Interpreter pinnen:** in echten Playbooks
+  `ansible_python_interpreter=/usr/bin/python3` setzen (§5).
+
+### 7.3 Befund
+
+```
+PLAY RECAP
+localhost : ok=6  changed=1  unreachable=0  failed=0  skipped=0 …
+TASK [Debug-Kontext] msg: arch=aarch64 python=3.13.5
+```
+
+- Playbook-Mechanik im Chroot voll funktionsfähig: Facts, apt, Datei-
+  Operationen, assert — alles mit den im Image installierten
+  Binaries (ansible-core 2.19.11 aus `05-docker-ansible`)
+- Der Weg für chroot-sichere Build-time-Provisionierung steht offen;
+  User-/systemd-abhängige Provisionierung bleibt bei der Laufzeit
+  (ansible-pull/cloud-init — TODO Block 4)
+
 Verweise: [TODO.md](TODO.md) (Block 3 Dev-Build-Workflow, Block 4
 Ansible-Strategie) ·
 `../rpi-robot-base/provisioning/ansible/roles/robot_codeserver`

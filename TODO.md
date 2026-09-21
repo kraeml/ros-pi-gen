@@ -294,7 +294,10 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       gibt es den Benutzer nicht. **Experiment bestätigt (2026-09-21):**
       ansible-Smoke-Test im Build-Chroot liefert `ping: pong`
       (ansible-core 2.19, python3.13 auto-erkannt, Schritt ~77 s unter
-      qemu); Details, Rezept und Grenzen:
+      qemu); Playbook-Mechanik ebenfalls im Chroot verifiziert
+      (Stub-Playbook: ok=6/failed=0, Facts/arch=aarch64 — chroot-sichere
+      Module wie debug/apt/copy/assert); Details, Rezepte (inkl.
+      manuellem Chroot-Login) und Grenzen:
       [Ansible-im-Build.md](Ansible-im-Build.md)
 - [ ] First-User/SSH-Defaults: `FIRST_USER_PASS` +
       `DISABLE_FIRST_BOOT_USER_RENAME=1` (+ `PUBKEY_SSH_FIRST_USER`) in der
