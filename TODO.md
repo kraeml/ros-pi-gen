@@ -7,11 +7,17 @@ Blöcke: **1** Overlay ersetzen · **2** AccessPopup · **3** Build-/CI-Härtung
 
 ## 1. Overlay-Kopieren durch versioniertes Verfahren ersetzen
 
-### Ausgangslage
+**Umgesetzt (2026-09-22, Feature `stage-custom-build`):** pi-gen ist
+git-Submodul (arm64, gepinnt `74d08a3`), gebaut wird über das
+[Makefile](README.md#build-mit-make-empfohlener-weg) mit
+`STAGE_LIST="stage0 stage1 stage2 stage-custom"` — kein Kopieren mehr
+(Details unten, Idee b, realisiert als anhängende Stage). Offen bleibt nur
+die Pin-Update-Politik (siehe offene Fragen).
 
-Stand heute: ros-pi-gen ist ein Overlay-Repo. Für jeden Build muss manuell
-in den pi-gen-Clone kopiert werden (siehe README,
-[Overlay einbringen](README.md#overlay-einbringen-beide-wege)):
+### Ausgangslage (historisch)
+
+Stand früher: ros-pi-gen war ein Overlay-Repo. Für jeden Build musste
+manuell in den pi-gen-Clone kopiert werden:
 
 ```bash
 cp -r /pfad/zum/ros-pi-gen/stage2/* stage2/
@@ -53,7 +59,7 @@ Overlay-cp → Build-Aufruf (docker/native, Varianten-Flag).
   #   build.sh/build-docker.sh Aufruf, Flags durchreichen
   ```
 
-### Idee b) `STAGE_LIST` mit externem Stage + `stage-custom/` (Ziel — kein Kopieren mehr)
+### Idee b) `STAGE_LIST` mit externem Stage + `stage-custom/` (Ziel — kein Kopieren mehr) — **UMGESETZT**
 
 > **Mechanik verifiziert (2026-09-22, pi-gen 74d08a3, lokale Quelle):**
 > `build.sh:330-331` realpath't jeden `STAGE_LIST`-Eintrag unabhängig
@@ -64,46 +70,51 @@ Overlay-cp → Build-Aufruf (docker/native, Varianten-Flag).
 > wird durchgereicht (build-docker.sh:58, 102) — Mount-Pflicht wegen
 > `Dockerfile` `COPY . /pi-gen/`; die `config` wird ohnehin schon extern
 > eingebunden (`-c /config`-Rewrite, build-docker.sh:83, 103).
-> **Anwendungsfall/Treiber:** der geplante CI-Lauf
-> ([GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), Phase 2
-> `MODE=stage-custom`) nutzt genau diesen Mechanismus.
 
 pi-gen akzeptiert in `STAGE_LIST` Pfade **außerhalb** des pi-gen-Verzeichnisses
 (build.sh realpath't jede Stage unabhängig, cwd des Aufrufs ist maßgeblich).
 ros-pi-gen hält dann sein eigenes Stage-Dir und pi-gen bleibt **pristine**:
 
+**Umgesetzte Form (anhängende Stage — gewählt gegen den ursprünglichen
+Ersetzungs-Sketch):** `stage-custom` enthält **nur** `prerun.sh`
+(copy_previous) + `EXPORT_IMAGE` + die eigenen Sub-Stages 05–07; pi-gens
+`stage2` läuft vollständig durch (Sub-Stages 01–04) und exportiert nicht
+(`stage2/SKIP_IMAGES`, in pi-gens `.gitignore` → Submodul-Status bleibt
+sauber):
+
 ```
 ros-pi-gen/
 ├── pi-gen/                  # git-Submodul, unverändert, keine Kopien
 ├── stage-custom/            # eigenes Stage-Dir für den Build
-│   ├── prerun.sh            # copy_previous (aus pi-gen stage2 übernehmen)
-│   ├── EXPORT_IMAGE         # aus pi-gen stage2 übernehmen (Export aus diesem Stage)
-│   ├── 01-…04-…/            # Sub-Stages aus pi-gen stage2 (an gepinnten Commit gebunden)
+│   ├── prerun.sh            # copy_previous (Inhalt wie pi-gen stage2/prerun.sh)
+│   ├── EXPORT_IMAGE         # aus pi-gen stage2 übernommen (Export aus diesem Stage)
 │   ├── 05-docker-ansible/   # eigen
-│   ├── 06-variant/          # eigen (00-packages / 00-packages.desktop)
+│   ├── 06-variant-headless/ # eigen (Skip-Toggle statt gerichteter cp)
+│   ├── 06-variant-desktop/  # eigen (Skip-Toggle statt gerichteter cp)
 │   └── 07-accesspopup/      # eigen (AccessPopup AP-Fallback + Web-UI)
-└── config                   # STAGE_LIST zeigt auf stage-custom
+└── config                   # STAGE_LIST: stage0 stage1 stage2 stage-custom
 ```
 
-- **Nativ:** `STAGE_LIST="<clone>/stage0 <clone>/stage1 <ros-pi-gen>/stage-custom"`
-  (Wrapper setzt `STAGE_LIST` als Env-Var — build.sh nutzt
-  `${STAGE_LIST:-…}`, Env überschreibt den config-Default; so kann dieselbe
-  config nativ wie im Container dienen)
+- **Nativ:** `STAGE_LIST="<abs>/pi-gen/stage0 … <abs>/stage-custom"` als
+  Env-Var (make build ENGINE=native; build.sh nutzt `${STAGE_LIST:-…}`,
+  Env überschreibt den config-Default; dieselbe config nativ wie im
+  Container brauchbar)
 - **Docker:** build-docker.sh baut das pi-gen-Image aus dem pristine Clone
-  und mountet beim Lauf `PIGEN_DOCKER_OPTS="--volume <ros-pi-gen>/stage-custom:/pi-gen/stage-custom"`;
-  Wrapper setzt `STAGE_LIST=/pi-gen/stage0 /pi-gen/stage1 /pi-gen/stage-custom`
-  und übergibt die config via `-c <ros-pi-gen>/config` (wird zu `/config`
-  gemountet)
+  und mountet beim Lauf
+  `PIGEN_DOCKER_OPTS="--volume <ros-pi-gen>/stage-custom:/pi-gen/stage-custom:ro --volume <ros-pi-gen>/work:/pi-gen/work"`;
+  config via `-c <ros-pi-gen>/config` (wird zu `/config` gemountet);
+  deploy/ landet per `docker cp` im Aufruf-Verzeichnis (Repo-Root)
 - **Pro:** null Kopieren in pi-gen; Submodul-Status bleibt sauber;
   Overlay vollständig versioniert in ros-pi-gen; native + Docker aus
-  derselben Quelle
-- **Con:** pi-gens Sub-Stages `01-…`/`04-…` leben dupliziert in
-  ros-pi-gen und sind an den gepinnten pi-gen-Commit gebunden →
-  **Sync-Prüfung** nötig (Checksum-/git-diff-Vergleich gegen den Commit,
-  ggf. CI); `stage-custom` braucht `prerun.sh` + `EXPORT_IMAGE` aus pi-gen
-- **Randnotiz:** Sub-Stage-Erkennung (`for SUB_STAGE_DIR in
-  "${STAGE_DIR}"/*`) sortiert alphanumerisch — `01-…` bis `07-…` im
-  gemeinsamen Dir ist äquivalent zum heutigen Zustand nach dem cp
+  derselben Quelle; **kein Sync-Check nötig** (keine Duplikate von
+  pi-gen-Sub-Stages — der Preis ist nur die zusätzliche work-Kopie von
+  stage-custom, ~3 GB, und der harmlose Doppel-prerun)
+- **Varianten:** zwei parallele Sub-Stages (`06-variant-headless`/
+  `06-variant-desktop`), SKIP-Dateien als Schalter (gitignored, von
+  `make setup VARIANT=…` gesetzt) statt gerichtetem cp; `PIGEN_VARIANT`
+  entfällt vollständig
+- **Legacy:** der frühere Overlay-cp bleibt als `make setup MODE=overlay`
+  erhalten (Fallback)
 
 ### Idee c) git subtree (Vendoring)
 
@@ -179,7 +190,7 @@ ohne root.
   Build: `rpi-image-gen build -c robot.yaml` (nativ auf ARM64-Host oder
   via QEMU/Container, dort mit Rechten für Mount-Namespaces)
 
-### Bewertung / Empfehlung
+### Bewertung / Empfehlung (historisch, vor Umsetzung)
 
 1. **Idee a** als schneller Zwischenschritt (Submodul + `setup.sh`):
    sofortige Verbesserung der Bedienbarkeit, geringes Risiko.
@@ -203,23 +214,29 @@ ohne root.
    mittelfristig könnte f die Pipeline ersetzen, wenn ein Rebuild der
    OS-Basis in Layer-Form leistbar wird.
 
+**Entscheidung bei der Umsetzung:** Idee b als anhängende Stage (nicht als
+Ersetzungs-Stage) — dadurch entfällt die Sync-Prüfung aus Punkt 2/3
+vollständig (keine Duplikate von pi-gen-Sub-Stages), und Idee d (Fork)
+verliert ihren Hauptvorteil. Idee a wurde übersprungen (direkt zu b).
+
 ### Offene Fragen (Overlay)
 
 - [ ] Update-Politik für den pi-gen-Submodul-Commit (manuell anlassen vs.
-      regelmäßiges Pin-Update; Trixie-ABI-Änderungen beachten)
-- [ ] Sync-Check `01-…04-…` ↔ gepinnter Commit: lokales Skript (shasum)
-      und/oder CI-Job?
-- [ ] Wrapper-Interface: Flags (`CLEAN`, `CONTINUE`, `PRESERVE_CONTAINER`,
-      Variante headless/desktop) durchreichen; Default = Docker?
-- [ ] Desktop-Variante im Wrapper als Flag (`--variant desktop`) statt
-      gerichtetem cp lösen (Wrapper erzeugt `00-packages` aus der
-      Master-Vorlage)?
-- [ ] `WORK_DIR`/`DEPLOY_DIR` außerhalb des Submoduls legen (z. B.
-      `ros-pi-gen/work`, `ros-pi-gen/deploy`) und `.gitignore` in
-      ros-pi-gen ergänzen?
+      regelmäßiges Pin-Update; Trixie-ABI-Änderungen beachten) —
+      aktuell: **manuell** (Pin-Änderung = bewusster Commit im
+      ros-pi-gen-Repo; `make`-Guards verifizieren den Pin bei jedem Lauf)
+- [x] Sync-Check `01-…04-…` ↔ gepinnter Commit: **entfällt** —
+      Sub-Stages bleiben in pi-gen (anhängende Stage), keine Duplikate
+- [x] Wrapper-Interface: **Makefile** mit `MODE`, `VARIANT`, `ENGINE`,
+      `CLEAN`, `CONTINUE`, `PRESERVE_CONTAINER`; Default = Docker
+- [x] Desktop-Variante: **zwei parallele Sub-Stages + SKIP-Toggle**
+      (kein Datei-Inhalt wird je kopiert)
+- [x] `WORK_DIR`/`DEPLOY_DIR`: **`ros-pi-gen/work` + `ros-pi-gen/deploy`**
+      (Docker-Mount bzw. docker cp; nativ Env-Variablen), `.gitignore`
+      ergänzt
 - [ ] CI/CD-Anbindung (GitHub Actions): geplant in
-      [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md) — Wrapper-/Make-
-      Aufrufe sind dessen Thin-Wrapper (Schnittstelle Block 3/5, siehe
+      [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md) — Make-Targets
+      sind dessen Thin-Wrapper (Schnittstelle Block 3/5, siehe
       TODO-Block 3 „CI-Pipeline"); Artefakt-Upload aus `deploy/`,
       Image-Benennung inkl. pi-gen-Commit-Kürzel
 
@@ -228,7 +245,7 @@ ohne root.
 ## 2. AccessPopup – automatisches WLAN-/AccessPoint-Management
 
 Status: **Umsetzungsplan v2.1 beschlossen** (Details, Architektur, Tests:
-[AccessPopup.md](AccessPopup.md), §8). Umsetzung: `stage2/07-accesspopup/`.
+[AccessPopup.md](AccessPopup.md), §8). Umsetzung: `stage-custom/07-accesspopup/`.
 
 **Umgesetzt:** temporärer AP, wenn kein bekanntes WLAN erreichbar; Konfiguration
 per AccessPopup-Web-UI (Port 8052, Dispatcher-gated – nur im AP-Fenster aktiv);
@@ -238,7 +255,7 @@ via Pi-Imager = Geräteidentität – keine Etiketten, MAC nicht ablesbar;
 Fallback `Roboter-AP`); einheitliches AP-Passwort `Pi-WLAN-Setup-2026`;
 `WPA_COUNTRY="${WPA_COUNTRY:-DE}"` in der config (Imager bleibt maßgeblich).
 AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
-(`stage2/07-accesspopup/files/VENDORED.md`).
+(`stage-custom/07-accesspopup/files/VENDORED.md`).
 
 **Design-Entscheidung: Temporärer AccessPoint**
 
@@ -300,8 +317,9 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       Docker-/Image-Tests (Q1a, Q2–Q9, `test_extras_*`) brauchen einen
       Runner mit Docker + arm64-binfmt. **Planung liegt vor:**
       [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md)
-      (Thin-Wrapper-Makefile, 5 Stufen, Imager-2.0-Paketierung; Umsetzung
-      offen; auch für die Overlay-CI/CD-Frage aus Block 1, siehe dort)
+      (Thin-Wrapper-Makefile **umgesetzt** in Block 1/5, 5 Stufen,
+      Imager-2.0-Paketierung; Workflow-Datei offen; auch für die
+      Overlay-CI/CD-Frage aus Block 1, siehe dort)
 
 - [ ] Reproduzierbare Builds: apt-Snapshots (snapshot.debian.org),
       docker-ce-Version pinnen, Image-Benennung mit Datum +
@@ -327,7 +345,7 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       ./build-docker.sh` (nativ: einfach ohne `CLEAN=1`); `SKIP_IMAGES`
       spart den Image-Export während der Iteration.
       **Korrektur zur Ursprungsidee:** Ansible wird in
-      `stage2/05-docker-ansible` installiert, nicht in „stage5" —
+      `stage-custom/05-docker-ansible` installiert, nicht in „stage5" —
       `stage5` gibt es nur im upstream-pi-gen (LibreOffice/Extras) und
       wird von ros-pi-gen nicht gebaut (`STAGE_LIST` nur bis stage2).
       Timing-Beleg aus dem Build-Log vom 20.09. (`build-docker.log`):
@@ -434,17 +452,13 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       Image-Version; Abstimmung mit den geplanten `image-YYYY.MM.n`-Tags,
       siehe [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 3)
 
-- [ ] Einstiegs-Tooling auf Root-Ebene fehlt noch (kein `Makefile`, kein
-      `setup.sh`): venv-Anlage ist aktuell ein manueller Schritt
-      (`python3 -m venv .venv && .venv/bin/pip install -r
-      tests/requirements.txt`). Ein `make venv`/`make test`-Pattern nach
-      Vorbild `rpi-robot-base/Makefile` (Variable `VENV`, `guard-venv`,
-      `venv`-Target mit Datei-Abhängigkeit) würde Setup + Overlay-cp +
-      Build-Aufruf konsolidieren (siehe auch Block 1, Idee a); mit dem
-      geplanten CI-Makefile abstimmen
-      ([GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2 — dieselben
-      Targets `venv/lint/setup/build/test/package`), um doppelte
-      Mechanik zu vermeiden
+- [x] Einstiegs-Tooling auf Root-Ebene: **Makefile umgesetzt** (Feature
+      `stage-custom-build`) — `venv` mit Datei-Abhängigkeit nach
+      Vorbild `rpi-robot-base/Makefile`, dazu `lint/setup/build/test/ci`
+      (siehe Block 1); mit dem geplanten CI-Makefile abgestimmt
+      ([GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2 —
+      Makefile ist der Thin-Wrapper; `package` folgt mit der
+      Imager-Paketierung)
 
 - [ ] `tests/.work/`-Cache wächst unkontrolliert (aktuell ~12 GB: entpackte
       Images, RootFS-Staging) und wird nur manuell per
