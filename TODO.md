@@ -327,19 +327,38 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 
 - [ ] ROS 2 im Image: eigene Stage (`07-ros2`) vs. Runtime-Provisioning
       (Bezug Robotic-ROS2/`ugv_ws`); Größen-/Versionsfrage klären
-- [ ] Imager-2.0-Kompatibilität des Custom-Images: **Use custom** ohne
-      Repository-JSON ⇒ OS-Customization (Hostname/Schul-WLAN/SSH) wird
-      ausgelassen (beabsichtigt, kein Bug) — betrifft den Schul-WLAN-Workflow
-      (WLAN-Anleitung, Hardware-Test B1). Wege: (a) Repository-JSON mit
-      `init_format` (Werteliste ohne Bindestrich: `none`/`systemd`/
-      `cloudinit`/`cloudinit-rpi`/`rpi-preseed`/`""`, formale Referenz
-      `doc/schema-notes.md` im rpi-imager-Repo) oder (b) manuelle cloud-init-
-      Dateien (`user-data`/`network-config`) auf der bootfs-Partition.
-      Zu prüfen: erfüllt unser Image (pi-gen `stage2/04-cloud-init`:
-      cloud-init + `rpi-cloud-init-mods`, per Imager-Files aktivierbar) die
-      Voraussetzungen (NoCloud/bootfs, Network Config V2/Netplan,
-      `cc_raspberry_pi`/`raspi-config-vendor`)? Recherche:
-      [Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)
+- [ ] Imager-2.0-Kompatibilität des Custom-Images — **Grundlage ist geprüft
+      (2026-09-22, Image-Extrakt 20.09): Image-seitig erfüllt** — cloud-init
+      25.2-1~bpo13+1+rpt20 (5 Units aktiv), NoCloud (`99_raspberry-pi.cfg`,
+      `seedfrom file:///boot/firmware`), bootfs-Templates `user-data`/
+      `network-config`/`meta-data` (inert, nur Kommentare — immer an, da
+      pi-gen 74d08a3 `ENABLE_CLOUD_INIT=1` defaultet, build.sh:248; jetzt in
+      ros-pi-gen/config ausdrücklich gepinnt), netplan.io 1.1.2-7+rpt1 +
+      NM-Renderer, NetworkManager 1.52.1-1+rpt4, `cc_raspberry_pi` Modul
+      (ruft `raspi-config nonint` direkt — `raspi-config-vendor` nur für
+      Fremddistros nötig). **Userconf-Interplay geklärt:** die
+      `raspberry_pi_os`-Distro-Klasse legt den Imager-User via
+      `userconf-pi` an (Rename des pi-Platzhalters) und maskiert
+      `userconfig.service` — kein doppelter Setup-Assistent.
+      **Workflow offen:** Imager 2.x nimmt bei **Use custom** `init_format:
+      "none"` an ⇒ Customization (Hostname/Schul-WLAN/SSH) wird ausgelassen
+      (Beleg: rpi-imager `doc/os_customisation_formats.md`); Imager 1.x darf
+      gar nicht mehr (Bug: nimmt fälschlich `systemd` an ⇒ Customization
+      wirkungslos auf Trixie). Drei offene Schritte:
+      - [ ] Handgeschriebenes Repository-JSON/Manifest für unser Image
+            (`init_format: cloudinit` oder `cloudinit-rpi` — cloudinit-rpi
+            sollte auf der Basis funktionieren; gegen Imager 2.0.11.1
+            testen; `create_local_json.py` aus dem rpi-imager-Repo hilft
+            **nicht**, es matcht nur offizielle Image-Namen)
+      - [ ] Hardware-Tests B1/B2 (Testprotokoll) mit Imager ≥ 2.0.6 +
+            Test-Manifest (Schul-WLAN-Workflow, WLAN-Anleitung); dabei
+            regdom/network-config (`regulatory-domain`) vs. Build-Fallback
+            `WPA_COUNTRY=DE` verifizieren
+      - [ ] Overlay-cp-Frische im pi-gen-Clone sicherstellen (Beleg:
+            Image 20.09 enthält `WirelessEnabled=false` — Clone-config
+            hatte kein `WPA_COUNTRY` beim Build; siehe README,
+            [Overlay einbringen](README.md#overlay-einbringen-beide-wege)).
+            Recherche: [Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)
 - [ ] Ansible-Strategie: build-time (heute) vs. ansible-pull/cloud-init
       zur Laufzeit. Konkretes Beispiel aus rpi-robot-base prüfen: die
       fertige Rolle `robot_codeserver`

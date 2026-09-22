@@ -17,6 +17,16 @@ export STAGE_LIST="${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2"
 ENABLE_SSH=1
 LOCALE_DEFAULT='de_DE.UTF-8'
 TIMEZONE_DEFAULT='Europe/Berlin'
+# Cloud-init-Templates (user-data/network-config/meta-data) auf bootfs:
+# Voraussetzung für Raspberry-Pi-Imager-2.0-OS-Customization ("filesystem
+# entry", sonst überspringt Imager 2.0 die Customization bei Use custom) und
+# für die NoCloud-Datasource (seedfrom file:///boot/firmware). pi-gen 74d08a3
+# defaultet ENABLE_CLOUD_INIT bereits auf 1 (build.sh) — hier ausdrücklich
+# gepinnt, damit ein Upstream-Default-Wechsel den Imager-Pfad nicht still
+# kappt. Ohne die Dateien ist cloud-init inaktiv; AccessPopup-Flow
+# unverändert. Details: Raspberry-Pi-Imager-2.0.md, TODO Block 4
+# (Imager-2.0-Kompatibilität)
+export ENABLE_CLOUD_INIT=1
 # Regulierungsdomäne: DE nur als Build-Fallback (i. d. R. setzt der Pi-Imager
 # die Domäne zur Laufzeit). Ohne Wert würde pi-gens 02-net-tweaks das WLAN-
 # Radio per WirelessEnabled=false deaktivieren; AccessPopup würde es sonst

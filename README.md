@@ -94,7 +94,13 @@ erst wieder möglich, wenn das Image über ein Repository-JSON eingebunden wird
 [Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)). Der
 Schul-WLAN-Workflow in der
 [WLAN-Anleitung](WLAN-Anleitung.md#wlan-am-roboter-einrichten--anleitung-für-einsteiger)
-setzt darauf auf.
+setzt darauf auf. Imager 1.x ist untauglich (nimmt fälschlich
+`init_format: systemd` an ⇒ Customization auf Trixie wirkungslos, Beleg:
+`doc/os_customisation_formats.md` im rpi-imager-Repo) – bitte **Imager
+≥ 2.0.6** verwenden. Das Image erfüllt die Customization-Voraussetzungen
+(cloud-init + NoCloud auf bootfs + NetworkManager/Netplan, seit Build
+2026-09-20 belegt; `ENABLE_CLOUD_INIT=1` ist in der `config` gepinnt).
+Ausstehend: Repository-JSON für das Image (TODO Block 4).
 
 ## Nativer Build (ohne Docker)
 

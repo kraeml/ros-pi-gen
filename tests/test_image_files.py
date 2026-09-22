@@ -55,6 +55,12 @@ BOOT_MANIFEST: list[str] = [
     "bcm2710-rpi-3-b.dtb",
     "cmdline.txt",
     "config.txt",
+    # Cloud-init-Templates (Imager-2.0-Voraussetzung, stage2/04-cloud-init):
+    # müssen auf bootfs liegen, sonst überspringt Imager 2.0 bei
+    # "Use custom" die OS-Customization komplett (filesystem entry fehlt).
+    "meta-data",
+    "network-config",
+    "user-data",
 ]
 
 
@@ -76,3 +82,34 @@ def test_image_rootfs_datei(pack, path, expectation):
 @pytest.mark.parametrize("name", BOOT_MANIFEST, ids=lambda v: f"boot/{v}")
 def test_image_boot_datei(pack, name):
     assert (pack.boot_dir / name).is_file(), f"fehlt in Boot-Partition: {name}"
+
+
+@pytest.mark.parametrize(
+    "name,erlaubte_schluessel",
+    [
+        ("user-data", set()),
+        ("network-config", set()),
+        # meta-data ist absichtlich NICHT leer: dsmode: local = user-data
+        # vor dem Netzwerk-Start anwenden; instance_id = feste NoCloud-ID
+        # (Aenderung wuerde First-Setup erneut triggern).
+        ("meta-data", {"dsmode", "instance_id"}),
+    ],
+    ids=lambda v: f"boot/{v}",
+)
+def test_image_boot_cloudinit_template_inert(pack, name, erlaubte_schluessel):
+    """Cloud-init-Templates auf bootfs bleiben ohne Imager inaktiv.
+
+    user-data/network-config: nur Kommentare (cloud-init tut nichts, bis
+    Imager 2.0 sie bei Customization ueberschreibt). meta-data: nur die
+    zwei beabsichtigten NoCloud-Schluessel.
+    """
+    text = (pack.boot_dir / name).read_text()
+    assert text.lstrip().startswith("#"), f"{name} ist kein Kommentartemplate"
+    aktiv = {
+        zeile.split(":")[0].strip()
+        for zeile in text.splitlines()
+        if zeile.strip() and not zeile.lstrip().startswith("#")
+    }
+    assert aktiv <= erlaubte_schluessel, (
+        f"{name} enthaelt unerwartete aktive Schluessel: {sorted(aktiv - erlaubte_schluessel)!r}"
+    )

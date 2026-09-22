@@ -4,6 +4,13 @@ Diese Anleitung richtet das Heim-WLAN am Roboter ein. Die Schul-WLAN-Daten
 werden von der Lehrkraft mit dem **Raspberry-Pi-Imager** aufgespielt — hier
 geht es nur um das WLAN zu Hause.
 
+> **Hinweis für die Lehrkraft (Imager 2.0):** Ab Imager 2.0 ist für die
+> Customization (Hostname, Schul-WLAN) ein **Repository-JSON für unser
+> Roboter-Image nötig** — "Use custom" allein wird übersprungen (Details:
+> [Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)). Bis das Manifest
+> ausgerollt ist: Imager ≥ 2.0.6 einsetzen und den Flash-Vorgang vorher am
+> Testgerät prüfen.
+
 ## Was du brauchst
 
 - Den Namen deines Heim-WLANs (SSID) und das WLAN-Passwort
