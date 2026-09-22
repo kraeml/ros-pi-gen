@@ -46,7 +46,7 @@ PIGEN_DOCKER_OPTS := --volume $(STAGE_DIR):/pi-gen/stage-custom:ro \
 SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) $(STAGE_DIR)/prerun.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test ci clean-variant-skips
+.PHONY: help venv lint setup build test ci clean-variant-skips clean-container
 .PHONY: setup-stage-custom setup-overlay
 
 help:
@@ -58,6 +58,7 @@ help:
 	@echo "  make build                    Image bauen (ENGINE=docker|native, VARIANT=…)"
 	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/"
 	@echo "  make ci                       venv lint setup build test"
+	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo
 	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN)"
 
@@ -110,7 +111,7 @@ clean-variant-skips:
 	@rm -f $(foreach s,$(VARIANT_STAGES),$(STAGE_DIR)/$(s)/SKIP)
 
 # --- build ------------------------------------------------------------------
-build: guard-pigen guard-variant
+build: guard-pigen guard-variant guard-container
 ifeq ($(ENGINE),docker)
 	@mkdir -p $(WORK_DIR) $(DEPLOY_DIR)
 	cd $(REPO_ROOT) && CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
@@ -141,3 +142,21 @@ guard-pigen:
 
 guard-variant:
 	@test -f $(STAGE_DIR)/06-variant-$(VARIANT)/00-packages || { echo "VARIANT=$(VARIANT) hat kein 06-variant-$(VARIANT)/00-packages" >&2; exit 1; }
+
+#Nicht laufende Container von früheren Läufen (exited/created) blockieren
+#build-docker.sh (Abbruch "CONTINUE=1"); ein Weiterbauen würde deren alte
+#Mounts/Stand erben. Läuft der Container, bricht build-docker.sh selbst ab.
+guard-container:
+	@if [ "$(CONTINUE)" != "1" ] && command -v docker >/dev/null 2>&1; then \
+		state=$$(docker ps -a --format '{{.Names}} {{.State}}' 2>/dev/null | awk '$$1=="pigen_work"{print $$2}'); \
+		if [ -n "$$state" ] && [ "$$state" != "running" ]; then \
+			echo "Container pigen_work vorhanden (Zustand: $$state) — räumen: make clean-container" >&2; \
+			echo "(Weiterbauen im Container: make build CONTINUE=1 — erbt dessen alte Mounts/Stand!)" >&2; \
+			exit 1; \
+		fi; \
+	fi
+
+# Verwaisten Build-Container entfernen (idempotent; -v löscht mitgekommene
+# anonyme Volumes, bind-Mounts auf dem Host bleiben unberührt)
+clean-container:
+	@docker rm -v pigen_work 2>/dev/null && echo "Container pigen_work entfernt." || echo "Kein Container pigen_work vorhanden."

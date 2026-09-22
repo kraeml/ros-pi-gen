@@ -332,6 +332,24 @@ Die Image-Suche deckt `deploy/` (Docker-Build) und `pi-gen/deploy/`
 
 ## Troubleshooting
 
+### `Container pigen_work already exists and you did not specify CONTINUE=1` (Docker-Weg)
+
+Ein alter Build-Container liegt noch herum (pi-gen behält ihn nur bei
+`PRESERVE_CONTAINER=1` oder nach Abbruch). Räumen:
+
+```bash
+make clean-container      # = docker rm -v pigen_work
+```
+
+Läuft der Container gerade, bricht pi-gen selbst ab (kein zweiter
+paralleler Build). **Vorsicht mit `make build CONTINUE=1`:** der
+Weiterbau hängt sich per `--volumes-from` an die Mounts des *alten*
+Containers — das ist nur für Fortsetzen desselben Laufs (Abbruch mit
+`PRESERVE_CONTAINER=1`) sinnvoll, nicht für einen frischen Build. Ein
+exited/created-Container von früher blockiert `make build` ohnehin mit
+einem klaren Hinweis (Guard im Makefile), statt der generischen
+pi-gen-Meldung.
+
 ### `E: Release signed by unknown key (key id 762F67A0B2C39DE4)` (nur nativer Weg)
 
 Der Stage-0-Bootstrap (`debootstrap`) prüft die Signatur der Debian-
