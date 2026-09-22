@@ -1,23 +1,35 @@
-# ros-pi-gen – pi-gen-Overlay für eigene Raspberry-Pi-Images
+# ros-pi-gen – eigene Raspberry-Pi-Images auf pi-gen-Basis
 
 Eigenes arm64-Image für Raspberry Pi 3+/4/5 auf Basis von Debian Trixie mit
-Docker CE und Ansible. Dieses Repo enthält die pi-gen-Konfiguration (`config`)
-und eigene Stages (`stage2/05-docker-ansible`, `stage2/06-variant`,
-`stage2/07-accesspopup`), die als Overlay auf einen
-[pi-gen](https://github.com/RPi-Distro/pi-gen)-Checkout (arm64-Branch) gelegt
-werden.
+Docker CE und Ansible. Dieses Repo hält die pi-gen-Konfiguration (`config`)
+und eigene Stages (`stage-custom/05-docker-ansible`, `stage-custom/06-variant-*`,
+`stage-custom/07-accesspopup`); pi-gen selbst ist als
+[git-Submodul](https://github.com/RPi-Distro/pi-gen) (arm64-Branch, gepinnter
+Commit `74d08a3`) eingebunden und bleibt **unverändert** — gebaut wird mit
+`STAGE_LIST="stage0 stage1 stage2 stage-custom"`, wobei pi-gens `stage2`
+durchläuft (Sub-Stages 01–04) und `stage-custom` als zusätzliche Stage das
+RootFS übernimmt (`copy_previous`) und daraus exportiert. Kopieren in den
+pi-gen-Tree gibt es **nicht mehr** (Hintergrund: [TODO.md](TODO.md), Block 1,
+Idee b).
+
+**Schnellstart:**
+
+```bash
+git submodule update --init   # pi-gen @ gepinntem Commit holen
+make setup && make build      # Docker-Build, headless (Default)
+make test                     # Testinfra gegen deploy/
+```
 
 **Empfohlener Weg:** Build mit Docker — der `debian:trixie`-Container bringt
 Keyring, debootstrap und qemu aktuell mit, auf dem Host ist nur Docker Engine
 nötig. Der native Build ist die Rückfallebene ohne Docker (→
-[Nativer Build](#nativer-build-ohne-docker)). Damit das Overlay-Kopieren
-mittelfristig entfällt: siehe [TODO.md](TODO.md). Als alternative,
+[Nativer Build](#nativer-build-ohne-docker)). Als alternative,
 RPi-offizielle Build-Pipeline mit deklarativer YAML-Konfiguration wird
 außerdem `rpi-image-gen` diskutiert (→
 [Eigene-Raspberry-Pi-Images-rpi-image-gen.md](Eigene-Raspberry-Pi-Images-rpi-image-gen.md),
 Einordnung in [TODO.md](TODO.md), Block 1). Einen geplanten CI-Lauf
 (GitHub Actions: Build + Test + Imager-2.0-Repository-JSON, auch lokal
-lauffähig) beschreibt
+lauffähig, ruft genau diese Make-Targets auf) beschreibt
 [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md); einen Überblick über
 pi-gen selbst (Stages, Config, Docker) liefert
 [Pi-Gen-Tool.md](Pi-Gen-Tool.md).
@@ -32,69 +44,90 @@ pi-gen selbst (Stages, Config, Docker) liefert
 - **Beide Wege:** 20–40 GB Plattenplatz, Dauer 30 min bis mehrere Stunden;
   Pfad ohne Leerzeichen (debootstrap-Beschränkung).
 
-## Overlay einbringen (beide Wege)
+## Build mit Make (empfohlener Weg)
+
+Das Makefile im Repo-Root ist der Thin-Wrapper für Setup, Build und Test —
+dieselben Targets nutzt der geplante CI-Lauf
+([GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2). `make help`
+listet alle Targets; die wichtigsten Variablen: `MODE`
+(`stage-custom`, Default | `overlay`, Legacy), `VARIANT` (`headless`,
+Default | `desktop`), `ENGINE` (`docker`, Default | `native`),
+`CONTINUE`/`PRESERVE_CONTAINER`/`CLEAN` (pi-gen-Flags).
 
 ```bash
-# pi-gen klonen (arm64-Branch) und auf gepinnten Commit halten
-git clone --branch arm64 https://github.com/RPi-Distro/pi-gen.git
-cd pi-gen
-git checkout 74d08a3   # aktuell gepinnter Commit (Stand: 2026-09)
-
-# Overlay einbringen — Reihenfolge beachten: erst Overlay, dann Varianten-cp
-cp -r /pfad/zum/ros-pi-gen/stage2/* stage2/
-cp /pfad/zum/ros-pi-gen/config config
+make venv      # venv + Testabhängigkeiten (Datei-Abhängigkeit zu tests/requirements.txt)
+make lint      # shellcheck + Overlay-Tests (ohne Docker/Image)
+make setup     # pi-gen @ Pin prüfen, SKIP_IMAGES setzen, Variante schalten
+make build     # Docker-Build; deploy/ + build-docker.log landen in ros-pi-gen/deploy/
+make test      # Testinfra (Gruppe Q) gegen das frisch gebaute Image
+make ci        # alles nacheinander: venv lint setup build test
 ```
 
-Was die beiden `cp`-Befehle bewirken:
+Was `make setup` (Default `MODE=stage-custom`) tut:
 
-- **`stage2/*`:** legt die eigenen Sub-Stages in pi-gens `stage2/` ab —
-  `05-docker-ansible/` (Docker CE + Ansible), `06-variant/` (Paketlisten
-  headless/desktop) und `07-accesspopup/` (AccessPopup AP-Fallback + Web-UI).
-  Der Overlay-cp muss vor jeder Varianten-Änderung laufen,
-  da er `06-variant/00-packages` neu anlegt (headless-Liste).
-- **`config`:** pi-gen versioniert `config` nicht (git-ignored) — der Befehl
-  **erzeugt** sie neu (bzw. überschreibt eine alte). Inhalt: `IMG_NAME` (→
-  Name des Work-Dir `work/<IMG_NAME>`), `RELEASE=trixie`, `ARCH=arm64`,
-  `STAGE_LIST` (nur Stage 0–2, Export aus Stage 2), `ENABLE_SSH=1`,
-  `LOCALE_DEFAULT=de_DE.UTF-8`, `TIMEZONE_DEFAULT=Europe/Berlin`,
-  `WPA_COUNTRY` (Build-Fallback `DE`; zur Laufzeit setzt i. d. R. der
-  Pi-Imager die Regulierungsdomäne) und `PIGEN_VARIANT='headless'`
-  (Default-Variante, siehe
-  [Variante wählen](#variante-wählen-headless-vs-desktop)).
-- **`stage2/06-variant/00-packages.desktop`** ist eine **inerte
-  Master-Vorlage**: pi-gen liest ausschließlich Dateien namens `NN-packages`
-  und installiert die `.desktop`-Datei niemals von selbst.
+- prüft, dass das Submodul genau auf dem gepinnten Commit steht (wird nie
+  automatisch geändert — Pin-Updates sind bewusste Commits)
+- setzt `pi-gen/stage2/SKIP_IMAGES` (in pi-gens `.gitignore` enthalten → der
+  Submodul-Status bleibt sauber): `stage2` läuft vollständig durch
+  (01-sys-tweaks bis 04-cloud-init), exportiert aber **nicht**; exportiert
+  wird aus `stage-custom` (dort liegt `EXPORT_IMAGE`)
+- schaltet die Varianten-Sub-Stages per SKIP-Datei (siehe
+  [Variante wählen](#variante-wählen-headless-vs-desktop))
+- entfernt Overlay-Reste aus `pi-gen/stage2` (Rückstände eines
+  `MODE=overlay`-Laufs würden sonst doppelt/falsch ausgeführt)
 
-## Build mit Docker (empfohlener Weg)
+`make build` (Default `ENGINE=docker`) ruft `pi-gen/build-docker.sh` aus dem
+Repo-Root auf und mountet `stage-custom` (read-only) und `work/` in den
+Build-Container; `deploy/` wird vom Skript per `docker cp` ohnehin in das
+Aufruf-Verzeichnis kopiert — alles liegt damit in ros-pi-gen, nicht im
+Submodul. Nützliche pi-gen-Flags durchreichen:
 
-`build-docker.sh` baut ein pi-gen-Image auf Basis `debian:trixie` (das
-`Dockerfile` übernimmt per `COPY . /pi-gen/` Overlay und config in den
-Container) und führt den Build darin aus. Dadurch sind auf dem Host **keine
-weiteren Abhängigkeiten** nötig: Keyring, debootstrap und qemu-aarch64 sind
-im Container aktuell; das Host-Problem mit dem jammy-Keyring (siehe
-[Troubleshooting](#troubleshooting)) tritt hier gar nicht erst auf.
-
-```bash
-./build-docker.sh
-```
-
-Nützliche Varianten (dokumentiert in der pi-gen-README):
-
-- `CONTINUE=1 ./build-docker.sh` – nach Fehler im Container fortsetzen
-- `PRESERVE_CONTAINER=1 ./build-docker.sh` – Container `pigen_work`
-  behalten (z. B. zum Debuggen: `sudo docker run -it --privileged
+- `make build CONTINUE=1` – nach Fehler im Container fortsetzen
+- `make build PRESERVE_CONTAINER=1` – Container `pigen_work` behalten
+  (z. B. zum Debuggen: `sudo docker run -it --privileged
   --volumes-from=pigen_work pi-gen /bin/bash`)
 - `docker rm -v pigen_work` – alten Container aufräumen
 
-Das fertige Image samt `build-docker.log` landet in `deploy/`. Der
-Deploy-Dateiname folgt `image_<Datum>-<IMG_NAME><IMG_SUFFIX>`; das
-`-lite` kommt **automatisch** aus pi-gens `stage2/EXPORT_IMAGE`
-(gepinnter Commit: `IMG_SUFFIX="-lite"`) — ein Env-`IMG_SUFFIX` wird
-beim Export vom Stage überschrieben (build.sh:337 sourced die
-Stage-Datei), eine andere Kennzeichnung erfordert die
-Stage-Datei bzw. in Phase 2 ein eigenes `EXPORT_IMAGE` im
-stage-custom (TODO Block 1, Idee b). Flashen per
+Der Deploy-Dateiname folgt `image_<Datum>-<IMG_NAME><IMG_SUFFIX>`; das
+`-lite` kommt aus `stage-custom/EXPORT_IMAGE` (aus pi-gens stage2
+übernommen, `IMG_SUFFIX="-lite"`) — ein Env-`IMG_SUFFIX` wird beim Export
+vom Stage überschrieben (build.sh:337 sourced die Stage-Datei). Flashen per
 Raspberry Pi Imager (**Use custom**) oder `dd`/`balenaEtcher`.
+
+### Entwicklung: schnelle Iteration
+
+pi-gens SKIP-Mechanismus (README „Skipping stages to speed up development“)
+funktioniert unverändert — SKIP-Dateien in bereits gebauten Stages/
+Sub-Stages (in `pi-gen/stage2/` bzw. `stage-custom/`, gitignored), dann
+`make build CONTINUE=1 PRESERVE_CONTAINER=1`; `SKIP_IMAGES` in
+`stage-custom` spart den Image-Export während der Iteration. Rezept und
+RootFS-Seeding: [Ansible-im-Build.md](Ansible-im-Build.md). Achtung:
+SKIP-Dateien nach dem Test wieder entfernen (Vollbuild als periodischer
+Verifizierungsschritt).
+
+## Overlay einbringen (Legacy, `MODE=overlay`)
+
+Der frühere Weg — Kopieren der Stages in den pi-gen-Tree — bleibt als
+Fallback erhalten (`make setup MODE=overlay[VARIANT=…]`), falls ein Lauf
+ohne Mount-Mechanik nötig ist. Er hat die bekannten Nachteile (gerichtete
+cps, dirty Submodul-Tree) und rendert die config nach `pi-gen/config` um
+(`STAGE_LIST` nur bis stage2 + `PIGEN_VARIANT`, wie früher):
+
+```bash
+# was make setup MODE=overlay macht (manuell):
+git submodule update --init && git -C pi-gen checkout 74d08a3
+cp -r stage-custom/05-docker-ansible stage-custom/07-accesspopup pi-gen/stage2/
+cp -r stage-custom/06-variant-headless pi-gen/stage2/06-variant   # bzw. 06-variant-desktop
+sed 's@^export STAGE_LIST=.*@export STAGE_LIST="${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2"@' config > pi-gen/config
+echo "export PIGEN_VARIANT='headless'" >> pi-gen/config           # bzw. desktop
+```
+
+- **`config`:** pi-gen versioniert `config` nicht (git-ignored) — der
+  Schritt **erzeugt** sie neu (bzw. überschreibt eine alte). Inhalt: `IMG_NAME`
+  (→ Name des Work-Dir `work/<IMG_NAME>`), `RELEASE=trixie`, `ARCH=arm64`,
+  `STAGE_LIST`, `ENABLE_SSH=1`, `LOCALE_DEFAULT=de_DE.UTF-8`,
+  `TIMEZONE_DEFAULT=Europe/Berlin`, `WPA_COUNTRY` (Build-Fallback `DE`;
+  zur Laufzeit setzt i. d. R. der Pi-Imager die Regulierungsdomäne).
 
 **Achtung ab Imager 2.0:** Beim lokalen Custom-Image über **Use custom** wird
 die OS-Customization (Hostname, Schul-WLAN, SSH …) **ausgelassen** – sie ist
@@ -157,67 +190,59 @@ sudo dpkg -i /tmp/debian-archive-keyring_2025.1_all.deb
 # 3) Partielles Bootstrap-Verzeichnis eines abgebrochenen Laufs entfernen
 #    (sonst überspringt stage0/prerun.sh den Bootstrap und der Build
 #    scheitert später im unvollständigen rootfs)
-sudo rm -rf <pi-gen-clone>/work/<IMG_NAME>/stage0
+sudo rm -rf work/<IMG_NAME>/stage0
 
-# 4) Nativer Build starten
-sudo ./build.sh 2>&1 | tee build.log
+# 4) Nativer Build starten (setzt STAGE_LIST/WORK_DIR/DEPLOY_DIR selbst)
+make build ENGINE=native 2>&1 | tee build.log
 ```
 
 Verifikation nach Schritt 2: `dpkg -l debian-archive-keyring` muss
 `2025.1` (oder neuer) zeigen.
 
-Das Image landet auch hier in `deploy/`.
+Das Image landet wie beim Docker-Weg in `ros-pi-gen/deploy/`. Technisch
+setzt `make build ENGINE=native` `STAGE_LIST` (absolute Pfade auf
+`pi-gen/stage0 stage1 stage2` + `stage-custom`), `WORK_DIR` und
+`DEPLOY_DIR` als Env-Variablen und ruft `build.sh` aus dem Submodul auf —
+der Aufruf-cwd `pi-gen/` ist nötig, damit pi-gen den Submodul-Commit
+(`GIT_HASH`, landet in der `.info`-Datei) und nicht den ros-pi-gen-Commit
+vermerkt; die Testinfra prüft genau diesen Pin (Q0b).
 
 ## Variante wählen (headless vs. desktop)
 
-Die Variante besteht aus **zwei zusammengehörigen Einstellungen**, die
-übereinstimmen müssen:
+Die Variante wird über die **Sub-Stage-Auswahl** in `stage-custom`
+geschaltet — es gibt zwei parallele Sub-Stages, `make` entfernt per
+SKIP-Datei (pi-gen-Konvention: Sub-Stages mit `SKIP` werden übersprungen)
+immer genau eine:
 
-| Variante | `PIGEN_VARIANT` in `config` | `stage2/06-variant/00-packages` | Image-Ergebnis |
+| Variante | aktive Sub-Stage | `00-packages` | Image-Ergebnis |
 |---|---|---|---|
-| headless (Default) | `'headless'` | openssh-server, network-manager | Headless-Image |
-| desktop | `'desktop'` | + xfce4, lightdm, xserver-xorg | XFCE-Desktop mit LightDM |
+| headless (Default) | `06-variant-headless` | openssh-server, network-manager | Headless-Image |
+| desktop | `06-variant-desktop` | + xfce4, lightdm, xserver-xorg | XFCE-Desktop mit LightDM |
 
-- `06-variant/01-run.sh` aktiviert LightDM **nur** bei
-  `PIGEN_VARIANT=desktop`.
-- Der Desktop-`cp` ersetzt die headless-Liste und ist **gerichtet** (die
-  headless-Inhalte sind danach im Clone weg).
+- Die Desktop-Sub-Stage aktiviert LightDM in `01-run.sh` **bedingtungslos** —
+  die Existenz der Sub-Stage ist der Schalter (kein Varianten-Flag muss in
+  den Build-Container gelangen).
+- headless- und Desktop-Paketliste sind committet und koexistieren —
+  **kein gerichteter `cp` mehr**, der die eine Liste durch die andere
+  ersetzt.
+- Die SKIP-Dateien sind gitignored; `make setup` setzt sie bei jedem Lauf
+  konsistent zum `VARIANT`-Wert (Mismatch ist ausgeschlossen).
 
-**headless (Default):** nichts weiter tun — Overlay-cp bringt
-`00-packages` (headless) und `config` (`PIGEN_VARIANT='headless'`) bereits
-konsistent mit.
+**headless (Default):** nichts weiter tun — `make setup` wählt sie.
 
-**desktop:** genau zwei Schritte, nachdem das Overlay eingebracht ist:
-
-```bash
-# 1) Variante in der kopierten config umschalten
-#    (in pi-gen/config: export PIGEN_VARIANT='desktop')
-#    alternativ: ros-pi-gen/config ändern und cp erneut ausführen
-
-# 2) Desktop-Paketliste aktivieren
-cp stage2/06-variant/00-packages.desktop stage2/06-variant/00-packages
-```
-
-**Nicht konsistent mischen** — die Folgen bei Mismatch:
-
-- `PIGEN_VARIANT='desktop'` **ohne** den cp: `systemctl enable lightdm`
-  scheitert in `01-run.sh` (Unit fehlt) → **Build bricht ab**.
-- cp **ohne** `PIGEN_VARIANT='desktop'`: xfce4/lightdm werden installiert,
-  aber lightdm **nicht aktiviert** → Image wird groß, bleibt aber ohne
-  Desktop-Autostart.
-
-**Rückweg zu headless** (headless-Liste wiederherstellen):
+**desktop:**
 
 ```bash
-cp /pfad/zum/ros-pi-gen/stage2/06-variant/00-packages stage2/06-variant/00-packages
-# und in pi-gen/config: export PIGEN_VARIANT='headless'
+make build VARIANT=desktop     # (macht setup VARIANT=desktop inklusive)
 ```
+
+**Rückweg zu headless:** `make setup` (Default).
 
 ## AccessPopup – WLAN-AP-Fallback mit Web-UI
 
 Stage `07-accesspopup` installiert [AccessPopup](https://github.com/RaspberryConnect/AccessPopup)
 (RaspberryConnect, gepinnter Commit `ba6eff1…`, Lizenz GPL-3.0, siehe
-`stage2/07-accesspopup/files/VENDORED.md`) **unverändert** und ergänzt
+`stage-custom/07-accesspopup/files/VENDORED.md`) **unverändert** und ergänzt
 projektspezifische Bausteine. AccessPopup bleibt für den AP↔WLAN-Wechsel
 zuständig (NetworkManager-AP-Modus, Prüfzyklus alle 2 Minuten, kein hostapd).
 
@@ -296,6 +321,15 @@ Details, Grenzen und die Begründung zum verworfenen QEMU-Kernel-Boot-Test:
 das Image die Stage nicht enthält, schlagen Q2–Q9 mit Verweis auf den nötigen
 Rebuild fehl (beabsichtigt).
 
+```bash
+make test                          # venv + pytest-Suite
+PIGEN_TEST_IMAGE=/pfad/img.xz make test   # Image explizit wählen
+```
+
+Die Image-Suche deckt `deploy/` (Docker-Build) und `pi-gen/deploy/`
+(nativ/manuell) ab; Q0f akzeptiert Varianten-Sub-Stages in
+`stage-custom` wie auch alte `stage2/06-variant`-Logs.
+
 ## Troubleshooting
 
 ### `E: Release signed by unknown key (key id 762F67A0B2C39DE4)` (nur nativer Weg)
@@ -333,8 +367,8 @@ Ein abgebrochener Lauf hinterlässt ein partielles
 `work/<IMG_NAME>/stage0/rootfs`. Der nächste Lauf überspringt den Bootstrap
 (`stage0/prerun.sh` bootstrappt nur, wenn `ROOTFS_DIR` fehlt) und scheitert
 später im unvollständigen rootfs. Vor dem Neustart `work/<IMG_NAME>/stage0`
-löschen oder mit `sudo CLEAN=1 ./build.sh` bauen – `CLEAN=1` entfernt
-`ROOTFS_DIR` vor `prerun.sh` und erzwingt einen frischen Bootstrap.
+löschen oder mit `make build ENGINE=native CLEAN=1` bauen – `CLEAN=1`
+entfernt `ROOTFS_DIR` vor `prerun.sh` und erzwingt einen frischen Bootstrap.
 
 ### `arm64: not supported on this machine/kernel` (nativ)
 
@@ -347,22 +381,33 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 
 | Datei | Zweck |
 |---|---|
-| `config` | pi-gen-Konfiguration (IMG_NAME, RELEASE=`trixie`, `PIGEN_VARIANT`, `STAGE_LIST`, `ENABLE_SSH`, Locale/Zeitzone) |
-| `stage2/05-docker-ansible/` | Docker (offizielles docker.com-Repository, Suite `trixie`) + Ansible + Werkzeuge |
-| `stage2/06-variant/` | Headless- (`00-packages`) vs. Desktop-Pakete (`00-packages.desktop`); `01-run.sh` aktiviert LightDM nur bei Desktop |
-| `stage2/07-accesspopup/` | AccessPopup (AP-Fallback, gepinnt `ba6eff1…`, GPL-3.0) + Web-UI + Captive-Redirect + nftables-Isolation + hostname-SSID; Details im [AccessPopup-Abschnitt](#accesspopup--wlan-ap-fallback-mit-web-ui) |
+| `config` | pi-gen-Konfiguration (IMG_NAME, RELEASE=`trixie`, `STAGE_LIST`, `ENABLE_SSH`, Locale/Zeitzone) |
+| `pi-gen/` | git-Submodul (arm64-Branch, gepinnt `74d08a3`) — unverändert pristine; Updates nur durch bewusste Pin-Änderung |
+| `stage-custom/` | eigenes Stage-Dir, hängt per `STAGE_LIST` hinter pi-gens stage2; enthält `prerun.sh` (copy_previous) + `EXPORT_IMAGE` (Export aus diesem Stage) |
+| `stage-custom/05-docker-ansible/` | Docker (offizielles docker.com-Repository, Suite `trixie`) + Ansible + Werkzeuge |
+| `stage-custom/06-variant-headless/` | Headless-Pakete (openssh-server, network-manager); wird per SKIP-Datei aktiviert (Default) |
+| `stage-custom/06-variant-desktop/` | Desktop-Pakete (xfce4, lightdm, xserver-xorg); `01-run.sh` aktiviert LightDM bedingungslos — Existenz der Sub-Stage = Schalter |
+| `stage-custom/07-accesspopup/` | AccessPopup (AP-Fallback, gepinnt `ba6eff1…`, GPL-3.0) + Web-UI + Captive-Redirect + nftables-Isolation + hostname-SSID; Details im [AccessPopup-Abschnitt](#accesspopup--wlan-ap-fallback-mit-web-ui) |
+| `Makefile` | Thin-Wrapper: `venv lint setup build test ci` (identisch lokal wie in CI, siehe [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2) |
+| `work/`, `deploy/` | Build-Erzeugnisse (gitignored): pi-gen-Arbeitsverzeichnis bzw. Image + `build-docker.log` |
 
 ## Konventionen
 
 - **Nummerierung:** pi-gen liefert in `stage2/` bereits Sub-Stages `01-…`
-  bis `04-…`; die eigenen laufen danach als `05-`, `06-` und `07-`.
-- **`PIGEN_VARIANT` statt `VARIANT`:** console-setup (`setupcon`) nutzt
+  bis `04-…`; die eigenen laufen in `stage-custom/` danach als `05-`,
+  `06-…` und `07-` (pi-gens Sub-Stage-Schleife sortiert je Stage-Dir
+  alphanumerisch — die Aufteilung auf zwei Dirs ändert an der
+  Ausführungsreihenfolge nichts).
+- **Kein `VARIANT` als Variablenname:** console-setup (`setupcon`) nutzt
   `VARIANT` als Konfig-Suffix im Chroot — der Build bricht sonst an
-  fehlenden `keyboard.headless`-Dateien. `PIGEN_VARIANT` wird von `config`
-  exportiert und von `01-run.sh` geprüft.
-- **`STAGE_LIST`:** Stage 0–2 (Basis + Custom-Stages, Export aus Stage 2).
-  Stage 3–5 des arm64-Branches bauen RPi-OS-Desktop-Varianten und
-  exportieren eigene Images — für dieses Projekt nicht gewünscht.
+  fehlenden `keyboard.headless`-Dateien. Die Variante steckt heute in der
+  Sub-Stage-Auswahl (`06-variant-headless`/`06-variant-desktop`), nicht in
+  einer Build-Variable; das heutige `PIGEN_VARIANT` entfällt daher.
+- **`STAGE_LIST`:** `stage0 stage1 stage2 stage-custom` (Basis + eigene
+  Stages, Export aus stage-custom; stage2 exportiert nicht — SKIP_IMAGES
+  von `make setup`). Stage 3–5 des arm64-Branches bauen RPi-OS-Desktop-
+  Varianten und exportieren eigene Images — für dieses Projekt nicht
+  gewünscht.
 - **`on_chroot`-Heredocs:** `NN-run.sh` läuft auf dem Build-Host; Chroot-
   Kommandos in `on_chroot << EOF … EOF`. `${RELEASE}`, `${ARCH}` und
   `${FIRST_USER_NAME}` expandieren build.sh-seitig.
