@@ -211,14 +211,17 @@ ohne root.
       und/oder CI-Job?
 - [ ] Wrapper-Interface: Flags (`CLEAN`, `CONTINUE`, `PRESERVE_CONTAINER`,
       Variante headless/desktop) durchreichen; Default = Docker?
-- [ ] `WORK_DIR`/`DEPLOY_DIR` außerhalb des Submoduls legen (z. B.
-      `ros-pi-gen/work`, `ros-pi-gen/deploy`) und `.gitignore` in
-      ros-pi-gen ergänzen?
 - [ ] Desktop-Variante im Wrapper als Flag (`--variant desktop`) statt
       gerichtetem cp lösen (Wrapper erzeugt `00-packages` aus der
       Master-Vorlage)?
-- [ ] CI/CD-Anbindung (GitLab-Runner mit Docker): Artefakt-Upload aus
-      `deploy/`, Image-Benennung inkl. pi-gen-Commit-Kürzel
+- [ ] `WORK_DIR`/`DEPLOY_DIR` außerhalb des Submoduls legen (z. B.
+      `ros-pi-gen/work`, `ros-pi-gen/deploy`) und `.gitignore` in
+      ros-pi-gen ergänzen?
+- [ ] CI/CD-Anbindung (GitHub Actions): geplant in
+      [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md) — Wrapper-/Make-
+      Aufrufe sind dessen Thin-Wrapper (Schnittstelle Block 3/5, siehe
+      TODO-Block 3 „CI-Pipeline"); Artefakt-Upload aus `deploy/`,
+      Image-Benennung inkl. pi-gen-Commit-Kürzel
 
 ---
 
@@ -255,6 +258,13 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 
 **Offene Fragen**
 
+- [ ] Hardware-Tests Gruppe A/B/C (Grundfunktion, Schul-/Heim-Wechsel,
+      Fehlerfälle) inkl. 2-Pi-Mehrgerätetest und Web-UI-Gating-Check
+      (AccessPopup.md §8.6); Beobachtungs-Helfer:
+      `tests/tools/pi-smoke.sh` (mit Pass/Fail) und `tools/pi-state.sh`
+
+**Erledigt (Archiv):**
+
 - [x] Zusammenspiel NetworkManager ↔ cloud-init ↔ AccessPopup
       (cloud-init ohne Imager-Files schlafend; NM verwaltet Profile exklusiv,
       AccessPopup schaltet nur per nmcli → kein Konflikt)
@@ -279,42 +289,37 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       Erste Läufe deckten echte Defekte auf: fehlendes Exec-Bit an
       `07-accesspopup/01-run.sh` (pi-gen skippte die Stage still) und ein
       daran hängender veralteter Image-Stand im deploy.
-- [ ] Hardware-Tests Gruppe A/B/C (Grundfunktion, Schul-/Heim-Wechsel,
-      Fehlerfälle) inkl. 2-Pi-Mehrgerätetest und Web-UI-Gating-Check
-      (AccessPopup.md §8.6); Beobachtungs-Helfer:
-      `tests/tools/pi-smoke.sh` (mit Pass/Fail) und `tools/pi-state.sh`
 
 ---
 
 ## 3. Build-/CI-Härtung
 
-- [x] QEMU-Smoke-Test des gebauten Images: umgesetzt als Container-Boot
-      (Q1a, systemd im arm64-RootFS) + Build-Log-/Manifest-Prüfungen
-      (Q0e–g, `test_image_files`); cloud-init- und Docker/Ansible-Checks in
-      `test_extras_*`. Der echte Kernel-Boot-Check läuft an der Hardware
-      (`pi-smoke.sh`, Q1) — QEMU-Vollsystem unter qemu 6.2 war nicht
-      tragfähig (siehe [tests/README.md](tests/README.md), „Warum kein QEMU“).
-      Details Block 2 ([Testprotokoll](Testprotokoll-AccessPopup.md),
-      Gruppe Q).
+- [ ] CI-Pipeline für ros-pi-gen selbst fehlt (kein `.github/workflows/`)
+      — mind. Lint/Overlay-Checks (`test_overlay_*`, `test_hostname_ssid`)
+      laufen ohne Docker/Image und wären günstig in CI abbildbar;
+      Docker-/Image-Tests (Q1a, Q2–Q9, `test_extras_*`) brauchen einen
+      Runner mit Docker + arm64-binfmt. **Planung liegt vor:**
+      [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md)
+      (Thin-Wrapper-Makefile, 5 Stufen, Imager-2.0-Paketierung; Umsetzung
+      offen; auch für die Overlay-CI/CD-Frage aus Block 1, siehe dort)
+
 - [ ] Reproduzierbare Builds: apt-Snapshots (snapshot.debian.org),
       docker-ce-Version pinnen, Image-Benennung mit Datum +
       pi-gen-Commit-Kürzel
+
 - [ ] Größen-Budget: Build failt, wenn headless-Image über einer Schwelle
       (Wert noch festlegen, z. B. 2 GB unkomprimiert)
+
 - [ ] Build-Metriken (Dauer, Image-Größe) pro Lauf sammeln für
       Regressionserkennung
+
 - [ ] `tests/requirements.txt` pinnen (aktuell nur `pytest>=7.0`, kein
       Upper-Bound) — Testläufe sind sonst nicht reproduzierbar, wenn pytest
       ein Breaking-Release bringt; ggf. `pip-compile`/Lock-Datei einführen
-- [ ] CI-Pipeline für ros-pi-gen selbst fehlt (kein `.gitlab-ci.yml`, kein
-      `.github/workflows/`) — mind. Lint/Overlay-Checks (`test_overlay_*`,
-      `test_hostname_ssid`) laufen ohne Docker/Image und wären günstig in
-      CI abbildbar; Docker-/Image-Tests (Q1a, Q2–Q9, `test_extras_*`)
-      brauchen einen Runner mit Docker + arm64-binfmt. **Planung liegt
-      vor:** [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md)
-      (Thin-Wrapper-Makefile, 5 Stufen, Imager-2.0-Paketierung; Umsetzung
-      offen)
-- [ ] Dev-Build-Workflow dokumentieren: schnelle Iteration über pi-gens
+
+**Erledigt (Archiv):**
+
+- [x] Dev-Build-Workflow dokumentieren: schnelle Iteration über pi-gens
       eigenen Mechanismus (pi-gen-README „Skipping stages to speed up
       development") statt Vollbuild — `SKIP`-Dateien in bereits gebauten
       Stages/Sub-Stages (liegen im pi-gen-Clone, gehören nicht ins
@@ -339,12 +344,52 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       `build-docker.sh` überschreibt `deploy/build-docker.log` bei jedem
       Lauf — der Vollbuild-Log vom 20.09. wurde dadurch ersetzt
 
+- [x] QEMU-Smoke-Test des gebauten Images: umgesetzt als Container-Boot
+      (Q1a, systemd im arm64-RootFS) + Build-Log-/Manifest-Prüfungen
+      (Q0e–g, `test_image_files`); cloud-init- und Docker/Ansible-Checks in
+      `test_extras_*`. Der echte Kernel-Boot-Check läuft an der Hardware
+      (`pi-smoke.sh`, Q1) — QEMU-Vollsystem unter qemu 6.2 war nicht
+      tragfähig (siehe [tests/README.md](tests/README.md), „Warum kein QEMU“).
+      Details Block 2 ([Testprotokoll](Testprotokoll-AccessPopup.md),
+      Gruppe Q).
 ---
 
 ## 4. Image-Inhalt / Architektur
 
-- [ ] ROS 2 im Image: eigene Stage (`07-ros2`) vs. Runtime-Provisioning
-      (Bezug Robotic-ROS2/`ugv_ws`); Größen-/Versionsfrage klären
+- [ ] First-User/SSH-Defaults: `FIRST_USER_PASS` +
+      `DISABLE_FIRST_BOOT_USER_RENAME=1` (+ `PUBKEY_SSH_FIRST_USER`) in der
+      config setzen, damit `usermod -aG docker`
+      (`05-docker-ansible/03-run.sh`) bereits im Build greift (siehe
+      README, „Erster Benutzer")
+
+- [ ] Ansible-Strategie: build-time (heute) vs. ansible-pull/cloud-init
+      zur Laufzeit. Konkretes Beispiel aus rpi-robot-base prüfen: die
+      fertige Rolle `robot_codeserver`
+      (`../rpi-robot-base/provisioning/ansible/roles/robot_codeserver` —
+      code-server-Download (.deb), systemd-User-Unit, Config-Template,
+      deutsches Sprachpaket) nutzt das im Image vorhandene Ansible
+      (`05-docker-ansible`) zur Nach-Boot-Provisionierung — damit lassen
+      sich solche Zusätze nach dem Image-Build installieren, ohne eine
+      eigene Build-Stage. Achtung: die Rolle braucht einen existierenden
+      Benutzer (Home-Dir, systemd --user) — hängt am First-User-Problem
+      (Punkt „First-User/SSH-Defaults" oben); im Chroot zur Build-Zeit
+      gibt es den Benutzer nicht. **Experiment bestätigt (2026-09-21):**
+      ansible-Smoke-Test im Build-Chroot liefert `ping: pong`
+      (ansible-core 2.19, python3.13 auto-erkannt, Schritt ~77 s unter
+      qemu); Playbook-Mechanik ebenfalls im Chroot verifiziert
+      (Stub-Playbook: ok=6/failed=0, Facts/arch=aarch64 — chroot-sichere
+      Module wie debug/apt/copy/assert); Details, Rezepte (inkl.
+      manuellem Chroot-Login) und Grenzen:
+      [Ansible-im-Build.md](Ansible-im-Build.md)
+
+- [ ] `config`-Kommentar zur Ansible-Rolle `robot_pigen` klären: verweist
+      auf `roles/robot_pigen/templates/config.j2`, die Rolle existiert
+      aber (Stand heute) in `rpi-robot-base` nicht und ist dort auch nicht
+      als Ticket/Idee verankert (Backlog geprüft, kein Treffer). Entweder
+      Integration mit rpi-robot-base konkret planen und dort ein Ticket
+      anlegen, oder Kommentar in `config` präzisieren, damit er nicht wie
+      eine bereits existierende Automatisierung wirkt
+
 - [ ] Imager-2.0-Kompatibilität des Custom-Images — **Grundlage ist geprüft
       (2026-09-22, Image-Extrakt 20.09): Image-seitig erfüllt** — cloud-init
       25.2-1~bpo13+1+rpt20 (5 Units aktiv), NoCloud (`99_raspberry-pi.cfg`,
@@ -377,64 +422,48 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
             hatte kein `WPA_COUNTRY` beim Build; siehe README,
             [Overlay einbringen](README.md#overlay-einbringen-beide-wege)).
             Recherche: [Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)
-- [ ] Ansible-Strategie: build-time (heute) vs. ansible-pull/cloud-init
-      zur Laufzeit. Konkretes Beispiel aus rpi-robot-base prüfen: die
-      fertige Rolle `robot_codeserver`
-      (`../rpi-robot-base/provisioning/ansible/roles/robot_codeserver` —
-      code-server-Download (.deb), systemd-User-Unit, Config-Template,
-      deutsches Sprachpaket) nutzt das im Image vorhandene Ansible
-      (`05-docker-ansible`) zur Nach-Boot-Provisionierung — damit lassen
-      sich solche Zusätze nach dem Image-Build installieren, ohne eine
-      eigene Build-Stage. Achtung: die Rolle braucht einen existierenden
-      Benutzer (Home-Dir, systemd --user) — hängt am First-User-Problem
-      (Punkt „First-User/SSH-Defaults" oben); im Chroot zur Build-Zeit
-      gibt es den Benutzer nicht. **Experiment bestätigt (2026-09-21):**
-      ansible-Smoke-Test im Build-Chroot liefert `ping: pong`
-      (ansible-core 2.19, python3.13 auto-erkannt, Schritt ~77 s unter
-      qemu); Playbook-Mechanik ebenfalls im Chroot verifiziert
-      (Stub-Playbook: ok=6/failed=0, Facts/arch=aarch64 — chroot-sichere
-      Module wie debug/apt/copy/assert); Details, Rezepte (inkl.
-      manuellem Chroot-Login) und Grenzen:
-      [Ansible-im-Build.md](Ansible-im-Build.md)
-- [ ] First-User/SSH-Defaults: `FIRST_USER_PASS` +
-      `DISABLE_FIRST_BOOT_USER_RENAME=1` (+ `PUBKEY_SSH_FIRST_USER`) in der
-      config setzen, damit `usermod -aG docker`
-      (`05-docker-ansible/03-run.sh`) bereits im Build greift (siehe
-      README, „Erster Benutzer")
-- [ ] `config`-Kommentar zur Ansible-Rolle `robot_pigen` klären: verweist
-      auf `roles/robot_pigen/templates/config.j2`, die Rolle existiert
-      aber (Stand heute) in `rpi-robot-base` nicht und ist dort auch nicht
-      als Ticket/Idee verankert (Backlog geprüft, kein Treffer). Entweder
-      Integration mit rpi-robot-base konkret planen und dort ein Ticket
-      anlegen, oder Kommentar in `config` präzisieren, damit er nicht wie
-      eine bereits existierende Automatisierung wirkt
+
+- [ ] ROS 2 im Image: eigene Stage (`07-ros2`) vs. Runtime-Provisioning
+      (Bezug Robotic-ROS2/`ugv_ws`); Größen-/Versionsfrage klären
 
 ---
 
 ## 5. Repo-Hygiene
 
-- [x] `.gitignore` in ros-pi-gen ergänzt: `tests/.work/`, `__pycache__/`,
-      `.pytest_cache/`. Der vorgesehene Teil `work/`, `deploy/`, `build.log`
-      entfällt — solche Dateien entstehen im ros-pi-gen-Repo nicht (Builds
-      laufen im pi-gen-Clone, dessen `.gitignore` das abdeckt).
-- [x] `Fehlermeldungen.md` und `README von pi-gen.md` — entfällt: die Dateien
-      existieren nicht mehr im Repo (die pi-gen-README ist online).
 - [ ] Branch-/Tag-Konvention festlegen (z. B. `main`, Tags je
-      Image-Version)
-- [x] `.venv` für die Testinfra: eigenständiges venv im Repo-Root
-      (`ros-pi-gen/.venv`, `python3 -m venv .venv` + `pip install -r
-      tests/requirements.txt`) statt Abhängigkeit vom Workspace-Root-venv;
-      `tests/run_tests.sh` sucht jetzt standardmäßig dort
-      (`PIGEN_TEST_VENV` überschreibt weiterhin), `.gitignore` ergänzt.
+      Image-Version; Abstimmung mit den geplanten `image-YYYY.MM.n`-Tags,
+      siehe [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 3)
+
 - [ ] Einstiegs-Tooling auf Root-Ebene fehlt noch (kein `Makefile`, kein
       `setup.sh`): venv-Anlage ist aktuell ein manueller Schritt
       (`python3 -m venv .venv && .venv/bin/pip install -r
       tests/requirements.txt`). Ein `make venv`/`make test`-Pattern nach
       Vorbild `rpi-robot-base/Makefile` (Variable `VENV`, `guard-venv`,
       `venv`-Target mit Datei-Abhängigkeit) würde Setup + Overlay-cp +
-      Build-Aufruf konsolidieren (siehe auch Block 1, Idee a)
+      Build-Aufruf konsolidieren (siehe auch Block 1, Idee a); mit dem
+      geplanten CI-Makefile abstimmen
+      ([GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2 — dieselben
+      Targets `venv/lint/setup/build/test/package`), um doppelte
+      Mechanik zu vermeiden
+
 - [ ] `tests/.work/`-Cache wächst unkontrolliert (aktuell ~12 GB: entpackte
       Images, RootFS-Staging) und wird nur manuell per
       `PIGEN_TEST_CLEAN=1`/`--clean-cache` geleert. Automatischen Cleanup
       ergänzen (z. B. Anzahl-/Alterslimit für alte
       `image_*`-Cache-Verzeichnisse beim Testlauf)
+
+**Erledigt (Archiv):**
+
+- [x] `.gitignore` in ros-pi-gen ergänzt: `tests/.work/`, `__pycache__/`,
+      `.pytest_cache/`. Der vorgesehene Teil `work/`, `deploy/`, `build.log`
+      entfällt — solche Dateien entstehen im ros-pi-gen-Repo nicht (Builds
+      laufen im pi-gen-Clone, dessen `.gitignore` das abdeckt).
+
+- [x] `Fehlermeldungen.md` und `README von pi-gen.md` — entfällt: die Dateien
+      existieren nicht mehr im Repo (die pi-gen-README ist online).
+
+- [x] `.venv` für die Testinfra: eigenständiges venv im Repo-Root
+      (`ros-pi-gen/.venv`, `python3 -m venv .venv` + `pip install -r
+      tests/requirements.txt`) statt Abhängigkeit vom Workspace-Root-venv;
+      `tests/run_tests.sh` sucht jetzt standardmäßig dort
+      (`PIGEN_TEST_VENV` überschreibt weiterhin), `.gitignore` ergänzt.
