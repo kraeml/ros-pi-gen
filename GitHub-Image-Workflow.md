@@ -91,7 +91,8 @@ rausgefilterte Runs sinnvoll, nicht als Pfad.
     Build-Kontext). Die `config` wird ohnehin schon extern eingebunden
     (`--volume …:/config:ro` + `-c /config`-Rewrite, Zeilen 83, 103).
   - **Nativ:** `STAGE_LIST` als Env-Var überschreibt den config-Default
-    (build.sh nutzt `${STAGE_LIST:-…}`).
+    (build.sh nutzt `${STAGE_LIST:-…}`). Stage-Grundlagen:
+    [Pi-Gen-Tool.md](Pi-Gen-Tool.md).
 
 Beide Modi teilen sich `build`/`test`/`package` — der Umschalter ist nur
 `setup` (und bei Phase 2 zusätzlich die Volume-Übergabe an `PIGEN_DOCKER_OPTS`
@@ -105,7 +106,7 @@ in `build`).
 |---|---|---|
 | `push` / PR auf `develop` | nur **A** (Lint/Overlay, ~Sekunden, ohne Docker) | günstiger Rückkanal; Vollbuild 1,5–3 h wäre unangemessen teuer |
 | Tag `image-YYYY.MM.n` (Calver, analog zum `schule-os`-Schema im Imager-Artikel) | A → B → C → D → **E** (Release) | versioniertes Release-Artefakt |
-| `workflow_dispatch` (Inputs: `init_format`, `img_suffix`, `dry_run`) | A → B → C → D (+ E nur mit `publish=true`) | Experimente/B1-Vorläufe, manuell |
+| `workflow_dispatch` (Inputs: `init_format`, `dry_run`) | A → B → C → D (+ E nur mit `publish=true`) | Experimente/B1-Vorläufe, manuell |
 
 **Stufen:**
 
@@ -123,8 +124,11 @@ in `build`).
   2. `docker/setup-qemu-action@v3` (arm64-binfmt; der pi-gen-Docker-Build
      registriert qemu-aarch64 teils selbst im Container — README —, aber
      explizit ist reproduzierbarer).
-  3. `make setup && make build` (`IMG_DATE=<Tag-Datum>`, `IMG_SUFFIX=-lite`
-      via Env — geht nicht aus der `config` hervor, siehe README). Baureihe
+  3. `make setup && make build` (`IMG_DATE=<Tag-Datum>` via Env —
+      `IMG_SUFFIX` **nicht** per Env: das `-lite` setzt pi-gens
+      `stage2/EXPORT_IMAGE` automatisch und überschreibt ein Env-IMG_SUFFIX
+      beim Export, build.sh:337; siehe
+      [Pi-Gen-Tool.md](Pi-Gen-Tool.md), Projekt-Anmerkung). Baureihe
       nach Beschluss: **Phase 1 mit `MODE=overlay`** (heute lauffähig;
       CI klont frisch, dirty-Tree egal), **Phase 2 wechselt auf
       `MODE=stage-custom`** sobald das externe Stage-Dir steht (Idee b) —
@@ -168,7 +172,8 @@ on:
     inputs:
       init_format: { default: "cloudinit-rpi", type: choice,
                      options: [cloudinit, cloudinit-rpi] }
-      img_suffix:  { default: "-lite" }
+      img_suffix:  { default: "-lite" }   # nur dokumentarisch: stage2/EXPORT_IMAGE
+                                          # setzt -lite selbst und überschreibt Env
       publish:     { default: false, type: boolean }
 permissions: { contents: write }
 jobs:

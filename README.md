@@ -18,7 +18,9 @@ außerdem `rpi-image-gen` diskutiert (→
 Einordnung in [TODO.md](TODO.md), Block 1). Einen geplanten CI-Lauf
 (GitHub Actions: Build + Test + Imager-2.0-Repository-JSON, auch lokal
 lauffähig) beschreibt
-[GitHub-Image-Workflow.md](GitHub-Image-Workflow.md).
+[GitHub-Image-Workflow.md](GitHub-Image-Workflow.md); einen Überblick über
+pi-gen selbst (Stages, Config, Docker) liefert
+[Pi-Gen-Tool.md](Pi-Gen-Tool.md).
 
 ## Voraussetzungen
 
@@ -85,9 +87,13 @@ Nützliche Varianten (dokumentiert in der pi-gen-README):
 - `docker rm -v pigen_work` – alten Container aufräumen
 
 Das fertige Image samt `build-docker.log` landet in `deploy/`. Der
-Deploy-Dateiname folgt `image_<Datum>-<IMG_NAME><IMG_SUFFIX>`; `IMG_SUFFIX`
-(optional, per Env, z. B. `-lite` für die Headless-Kennzeichnung) geht nicht
-aus der `config` hervor und muss beim Build ggf. gesetzt werden. Flashen per
+Deploy-Dateiname folgt `image_<Datum>-<IMG_NAME><IMG_SUFFIX>`; das
+`-lite` kommt **automatisch** aus pi-gens `stage2/EXPORT_IMAGE`
+(gepinnter Commit: `IMG_SUFFIX="-lite"`) — ein Env-`IMG_SUFFIX` wird
+beim Export vom Stage überschrieben (build.sh:337 sourced die
+Stage-Datei), eine andere Kennzeichnung erfordert die
+Stage-Datei bzw. in Phase 2 ein eigenes `EXPORT_IMAGE` im
+stage-custom (TODO Block 1, Idee b). Flashen per
 Raspberry Pi Imager (**Use custom**) oder `dd`/`balenaEtcher`.
 
 **Achtung ab Imager 2.0:** Beim lokalen Custom-Image über **Use custom** wird
