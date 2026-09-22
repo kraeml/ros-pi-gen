@@ -15,7 +15,10 @@ mittelfristig entfällt: siehe [TODO.md](TODO.md). Als alternative,
 RPi-offizielle Build-Pipeline mit deklarativer YAML-Konfiguration wird
 außerdem `rpi-image-gen` diskutiert (→
 [Eigene-Raspberry-Pi-Images-rpi-image-gen.md](Eigene-Raspberry-Pi-Images-rpi-image-gen.md),
-Einordnung in [TODO.md](TODO.md), Block 1).
+Einordnung in [TODO.md](TODO.md), Block 1). Einen geplanten CI-Lauf
+(GitHub Actions: Build + Test + Imager-2.0-Repository-JSON, auch lokal
+lauffähig) beschreibt
+[GitHub-Image-Workflow.md](GitHub-Image-Workflow.md).
 
 ## Voraussetzungen
 

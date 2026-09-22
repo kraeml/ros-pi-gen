@@ -45,7 +45,7 @@ GitHub-Runner                                   Lokal
 ─────────────                                   ─────
 make venv    → .venv + requirements             make venv
 make lint    → Overlay-/Shell-Checks            make lint
-make setup   → pi-gen @ 74d08a3 + Overlay-cp    make setup
+make setup   → pi-gen-Setup (2 Modi, s. u.)     make setup [MODE=…]
 make build   → build-docker.sh (Docker/QEMU)    make build
 make test    → tests/run_tests.sh               make test
 make package → Imager-JSON + Prüfsummen + bmap  make package
@@ -59,10 +59,43 @@ Make-Aufrufe, Upload). Optionale Paritätsprüfung mit
 nötig für binfmt/Docker, Diskgröße, kein Release-Upload): nur für Stufe A/B
 rausgefilterte Runs sinnvoll, nicht als Pfad.
 
-**Aufwand:** `make setup` automatisiert exakt den heute manuellen
-Overlay-cp ([README](README.md#overlay-einbringen-beide-wege)) — gleiche
-Mechanik wie TODO Block 1, Idee a (`setup.sh`); die Makefile-Targets können
-später 1:1 in diese Idee übernommen werden.
+**`make setup` — zwei Modi (Dual-Track, Beschluss 2026-09-22):**
+
+- **Phase 1 · `MODE=overlay` (Start):** pi-gen-Clone @ gepinntem Commit
+  `74d08a3` (arm64-Branch) + Overlay-cp in README-Reihenfolge
+  ([README](README.md#overlay-einbringen-beide-wege)) — gleiche Mechanik wie
+  TODO Block 1, Idee a (`setup.sh`). Bewährt und heute lauffähig; die
+  Ephemeralität der CI-Umgebung entschärft das dirty-Tree-Problem (der
+  Clone wird pro Lauf frisch geklont), **nicht** aber die gerichteten
+  cp-Fallen (`00-packages.desktop` überschreibt die headless-Liste,
+  `PIGEN_VARIANT`-Kopplung — siehe README-Warnungen).
+- **Phase 2 · `MODE=stage-custom` (Ziel):** pi-gen bleibt **pristine**
+  (Submodul), ros-pi-gen hält ein eigenes Stage-Dir und die `config` zeigt
+  per `STAGE_LIST` extern darauf — **kein Kopieren** (TODO Block 1, Idee b).
+  Mechanik gegen pi-gen `74d08a3` verifiziert (2026-09-22, lokale Quelle):
+  - `build.sh:330-331` `realpath`'t **jeden** `STAGE_LIST`-Eintrag
+    unabhängig — externe Pfade (absolut oder relativ zum cwd des Aufrufs)
+    sind nativ erlaubt; Default ist nur `${BASE_DIR}/stage*` (Zeile 320).
+  - Die Stage-Kette ist ortsunabhängig: `STAGE` wird per `basename` des
+    Stage-Dirs abgeleitet (build.sh:87), `ROOTFS_DIR`/`PREV_ROOTFS_DIR`
+    setzt build.sh pro Stage (Zeilen 91-92, 121-123) → `copy_previous`
+    (scripts/common:34) funktioniert im externen Dir.
+  - `EXPORT_CONFIG_DIR` ist ebenfalls realpath't/überschreibbar
+    (build.sh:323); das externe Stage braucht `prerun.sh` + `EXPORT_IMAGE`
+    aus pi-gen stage2 (`EXPORT_IMAGE` = nur `IMG_SUFFIX="-lite"` +
+    QEMU-Zusatz).
+  - **Docker:** `build-docker.sh` reicht `PIGEN_DOCKER_OPTS` (Zeilen 58,
+    102) in `docker run` durch → externes Stage per
+    `--volume <repo>/stage-custom:/pi-gen/stage-custom` mounten (Pflicht:
+    `Dockerfile` macht `COPY . /pi-gen/`, externe Pfade landen nicht im
+    Build-Kontext). Die `config` wird ohnehin schon extern eingebunden
+    (`--volume …:/config:ro` + `-c /config`-Rewrite, Zeilen 83, 103).
+  - **Nativ:** `STAGE_LIST` als Env-Var überschreibt den config-Default
+    (build.sh nutzt `${STAGE_LIST:-…}`).
+
+Beide Modi teilen sich `build`/`test`/`package` — der Umschalter ist nur
+`setup` (und bei Phase 2 zusätzlich die Volume-Übergabe an `PIGEN_DOCKER_OPTS`
+in `build`).
 
 ## 3. Pipeline
 
@@ -90,10 +123,13 @@ später 1:1 in diese Idee übernommen werden.
   2. `docker/setup-qemu-action@v3` (arm64-binfmt; der pi-gen-Docker-Build
      registriert qemu-aarch64 teils selbst im Container — README —, aber
      explizit ist reproduzierbarer).
-  3. `make setup` (Clone @ gepinntem Commit `74d08a3`, arm64-Branch;
-     Overlay-cp in README-Reihenfolge) + `make build`
-     (`IMG_DATE=<Tag-Datum>`, `IMG_SUFFIX=-lite` via Env — geht nicht aus
-     der `config` hervor, siehe README).
+  3. `make setup && make build` (`IMG_DATE=<Tag-Datum>`, `IMG_SUFFIX=-lite`
+      via Env — geht nicht aus der `config` hervor, siehe README). Baureihe
+      nach Beschluss: **Phase 1 mit `MODE=overlay`** (heute lauffähig;
+      CI klont frisch, dirty-Tree egal), **Phase 2 wechselt auf
+      `MODE=stage-custom`** sobald das externe Stage-Dir steht (Idee b) —
+      dann entfallen die gerichteten-cp-Fallen auch in CI; der Umschalter
+      ist ein Workflow-Input, Stufen C/D sind modus-unabhängig.
   4. Upload: `.img.xz`, `build-docker.log`, später JSON (Artefakt
      `image-artifacts`, Retention 7 Tage; bei Build-Fehler zusätzlich
      `work/`-Logzip, Retention 1 Tag — der 3,1-GB-work-Ordner ist zu groß
@@ -241,7 +277,8 @@ Generiertes `imager-repository.json` (V4-Sublist-Format, **ohne**
 ## 8. Offene Punkte
 
 - [ ] `make`-Zielnamen und Skript-Lagerort final (Makefile im Root vs.
-      `tools/`-Skripte; Schnittstelle zu TODO Block 1, Idee a)
+      `tools/`-Skripte; `setup`-Dual-Track: MODE-Interface und Umschalttermin
+      Phase 1 → Phase 2 festlegen — Schnittstelle zu TODO Block 1, Idee b)
 - [ ] Exakte `devices`-Tags gegen das offizielle
       `os_list_imagingutility_v4.json` verifizieren (pi3+/pi4/pi5 —
       Tag-Syntax nicht aus Schema-Doku ableitbar)
@@ -268,6 +305,18 @@ Default 1; `build-docker.sh`-Varianten aus README), Testinfra-Aufteilung
 ([tests/README.md](tests/README.md), `conftest.py`:
 `PIGEN_TEST_IMAGE`/Boot-Timeout 900 s), Deploy-Erzeugnisgrößen (808 MB xz /
 3,1 GB work, lokal gemessen).
+
+**Ergänzt (22.09.2026, Modus stage-custom / TODO Idee b):** pi-gen 74d08a3
+akzeptiert externe `STAGE_LIST`-Pfade nativ — `build.sh:330-331` (realpath
+je Eintrag, Default nur `${BASE_DIR}/stage*` Zeile 320), Stage-Kette
+ortsunabhängig (`STAGE` per `basename` Zeile 87, `ROOTFS_DIR`/
+`PREV_ROOTFS_DIR` build.sh-seitig Zeilen 91-92/121-123, `copy_previous`
+scripts/common:34), `EXPORT_CONFIG_DIR` extern-fähig (Zeile 323),
+`stage2/EXPORT_IMAGE` = nur `IMG_SUFFIX="-lite"` + QEMU-Zusatz;
+`build-docker.sh` reicht `PIGEN_DOCKER_OPTS` durch (Zeilen 58, 102) und
+bindet die config bereits extern ein (`--volume …:/config:ro`,
+`-c /config`-Rewrite, Zeilen 83, 103); Mount-Pflicht folgt aus
+`Dockerfile` (`COPY . /pi-gen/`).
 
 Offen/unverifiziert: exakte GitHub-Runner-Disk-Werte (Näherung aus
 Allgemeinwissen, im ersten Lauf kalibrieren), `devices`-Tag-Syntax der

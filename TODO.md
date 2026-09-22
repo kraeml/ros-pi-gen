@@ -55,6 +55,19 @@ Overlay-cp → Build-Aufruf (docker/native, Varianten-Flag).
 
 ### Idee b) `STAGE_LIST` mit externem Stage + `stage-custom/` (Ziel — kein Kopieren mehr)
 
+> **Mechanik verifiziert (2026-09-22, pi-gen 74d08a3, lokale Quelle):**
+> `build.sh:330-331` realpath't jeden `STAGE_LIST`-Eintrag unabhängig
+> (Default nur `${BASE_DIR}/stage*`, Zeile 320); Stage-Kette ortsunabhängig
+> (`STAGE` per `basename`, Zeile 87; `ROOTFS_DIR`/`PREV_ROOTFS_DIR`
+> build.sh-seitig, Zeilen 91-92/121-123; `copy_previous` scripts/common:34);
+> `EXPORT_CONFIG_DIR` extern-fähig (Zeile 323); Docker: `PIGEN_DOCKER_OPTS`
+> wird durchgereicht (build-docker.sh:58, 102) — Mount-Pflicht wegen
+> `Dockerfile` `COPY . /pi-gen/`; die `config` wird ohnehin schon extern
+> eingebunden (`-c /config`-Rewrite, build-docker.sh:83, 103).
+> **Anwendungsfall/Treiber:** der geplante CI-Lauf
+> ([GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), Phase 2
+> `MODE=stage-custom`) nutzt genau diesen Mechanismus.
+
 pi-gen akzeptiert in `STAGE_LIST` Pfade **außerhalb** des pi-gen-Verzeichnisses
 (build.sh realpath't jede Stage unabhängig, cwd des Aufrufs ist maßgeblich).
 ros-pi-gen hält dann sein eigenes Stage-Dir und pi-gen bleibt **pristine**:
@@ -172,7 +185,9 @@ ohne root.
    sofortige Verbesserung der Bedienbarkeit, geringes Risiko.
 2. **Idee b** als Endziel: eliminiert das Kopieren vollständig; Aufwand
    mittler (stage-custom + Wrapper + Sync-Check). Wenn b steht, entfällt
-   der Overlay-cp aus a.
+   der Overlay-cp aus a. Mechanik verifiziert (siehe oben); Treiber ist
+   auch der geplante CI-Lauf ([GitHub-Image-Workflow.md](GitHub-Image-Workflow.md),
+   Phase 2 `MODE=stage-custom`).
 3. **Idee d** als Alternative zu b prüfen, wenn Fork-Pflege lieber ist als
    stage-custom-Sync (beide eliminieren das Kopieren; b hält ros-pi-gen
    als einziges Overlay-Repo, d lebt im Fork).
@@ -295,7 +310,10 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       `.github/workflows/`) — mind. Lint/Overlay-Checks (`test_overlay_*`,
       `test_hostname_ssid`) laufen ohne Docker/Image und wären günstig in
       CI abbildbar; Docker-/Image-Tests (Q1a, Q2–Q9, `test_extras_*`)
-      brauchen einen Runner mit Docker + arm64-binfmt
+      brauchen einen Runner mit Docker + arm64-binfmt. **Planung liegt
+      vor:** [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md)
+      (Thin-Wrapper-Makefile, 5 Stufen, Imager-2.0-Paketierung; Umsetzung
+      offen)
 - [ ] Dev-Build-Workflow dokumentieren: schnelle Iteration über pi-gens
       eigenen Mechanismus (pi-gen-README „Skipping stages to speed up
       development") statt Vollbuild — `SKIP`-Dateien in bereits gebauten
