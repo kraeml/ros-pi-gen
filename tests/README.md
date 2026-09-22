@@ -21,6 +21,10 @@ python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
 ```
 
+Komfortabler via Makefile im Repo-Root: `make venv`, `make test`
+(durchgereicht an diese Suite) — siehe
+[README](../README.md#build-mit-make-empfohlener-weg).
+
 `run_tests.sh` findet die venv automatisch unter `ros-pi-gen/.venv`
 (überschreibbar mit `PIGEN_TEST_VENV`), installiert `requirements.txt`
 idempotent darin und ruft pytest auf. Alternativ direkt:
@@ -39,7 +43,8 @@ Partitions-Slices, RootFS-Staging). `PIGEN_TEST_CACHE` überschreibbar;
 `PIGEN_TEST_CLEAN=1` löscht vor dem Lauf. Kein sudo nötig.
 
 **Image-Auswahl:** automatisch die neueste `image_*.img[.xz]` in
-`pi-gen/deploy/` (Fallback `ros-pi-gen/deploy/`), überschreibbar mit
+`ros-pi-gen/deploy/` (Docker-Build via `make build`) bzw.
+`ros-pi-gen/pi-gen/deploy/` (nativer/manueller Lauf), überschreibbar mit
 `PIGEN_TEST_IMAGE=/pfad/zum/image.img.xz`.
 
 ## Testkatalog (Build-Host-Ebene)
@@ -126,7 +131,7 @@ echter Kernel, echte Peripherie.
 
 | Variable | Default | Wirkung |
 |---|---|---|
-| `PIGEN_TEST_IMAGE` | auto (neuestes in `pi-gen/deploy`) | explizites Image |
+| `PIGEN_TEST_IMAGE` | auto (neuestes in `deploy/` bzw. `pi-gen/deploy/`) | explizites Image |
 | `PIGEN_TEST_CACHE` | `tests/.work` | Cache-Verzeichnis |
 | `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen |
 | `PIGEN_TEST_BOOT_TIMEOUT` | `900` | Q1a: Sekunden bis systemd-Zustand |
@@ -138,6 +143,6 @@ echter Kernel, echte Peripherie.
 - **Manifest ergänzen:** `test_image_files.py` — Liste `ROOTFS_MANIFEST` /
   `BOOT_MANIFEST` (eine Zeile pro Datei oder Inhalts-Marker).
 - **Pflichtstufen ergänzen:** `REQUIRED_SUBSTAGES` in `test_q0_image_stand.py`.
-- Änderungen an `stage2/**` → Overlay-Guard sofort, Image-Tests nach Rebuild.
+- Änderungen an `stage-custom/**` → Overlay-Guard sofort, Image-Tests nach Rebuild.
 - Neue Protokollzeilen in Gruppe Q → Testfunktion mit passender ID
   (`test_q<N>_*`) bzw. Abschnitt in `pi-smoke.sh`.
