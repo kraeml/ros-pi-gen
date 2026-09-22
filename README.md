@@ -11,7 +11,11 @@ werden.
 Keyring, debootstrap und qemu aktuell mit, auf dem Host ist nur Docker Engine
 nötig. Der native Build ist die Rückfallebene ohne Docker (→
 [Nativer Build](#nativer-build-ohne-docker)). Damit das Overlay-Kopieren
-mittelfristig entfällt: siehe [TODO.md](TODO.md).
+mittelfristig entfällt: siehe [TODO.md](TODO.md). Als alternative,
+RPi-offizielle Build-Pipeline mit deklarativer YAML-Konfiguration wird
+außerdem `rpi-image-gen` diskutiert (→
+[Eigene-Raspberry-Pi-Images-rpi-image-gen.md](Eigene-Raspberry-Pi-Images-rpi-image-gen.md),
+Einordnung in [TODO.md](TODO.md), Block 1).
 
 ## Voraussetzungen
 
@@ -82,6 +86,15 @@ Deploy-Dateiname folgt `image_<Datum>-<IMG_NAME><IMG_SUFFIX>`; `IMG_SUFFIX`
 (optional, per Env, z. B. `-lite` für die Headless-Kennzeichnung) geht nicht
 aus der `config` hervor und muss beim Build ggf. gesetzt werden. Flashen per
 Raspberry Pi Imager (**Use custom**) oder `dd`/`balenaEtcher`.
+
+**Achtung ab Imager 2.0:** Beim lokalen Custom-Image über **Use custom** wird
+die OS-Customization (Hostname, Schul-WLAN, SSH …) **ausgelassen** – sie ist
+erst wieder möglich, wenn das Image über ein Repository-JSON eingebunden wird
+(`init_format`, Details und Wege: siehe
+[Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)). Der
+Schul-WLAN-Workflow in der
+[WLAN-Anleitung](WLAN-Anleitung.md#wlan-am-roboter-einrichten--anleitung-für-einsteiger)
+setzt darauf auf.
 
 ## Nativer Build (ohne Docker)
 

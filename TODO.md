@@ -127,6 +127,45 @@ anpassen — Locale, SSH, Docker-Repo, Ansible, eigene Pakete.
 - **Bewertung:** gut für schnelle Experimente; kein Ersatz für die
   versionierte Pipeline
 
+### Idee f) `rpi-image-gen` als alternative Build-Pipeline (RPi-offiziell)
+
+Nicht pi-gen erweitern, sondern auf
+[`rpi-image-gen`](https://github.com/raspberrypi/rpi-image-gen) wechseln —
+das zweite, offizielle RPi-Image-Werkzeug (aktuell v2.8.0, 2026-08;
+Hintergrund und Werkzeugvergleich:
+[Eigene-Raspberry-Pi-Images-rpi-image-gen.md](Eigene-Raspberry-Pi-Images-rpi-image-gen.md),
+auch zusammengefasst in
+[Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)):
+deklarative YAML-Konfiguration, Layer, Traits, mmdebstrap/genimage, läuft
+ohne root.
+
+- **Pro:** offizielles, aktiv entwickeltes RPi-Werkzeug; deklaratives
+  YAML + Layer lösen genau die Block-1-Probleme (keine gerichteten cps,
+  kein dirty Tree, Konfig versioniert im Repo); geräteklassengetrennt
+  (pi3/pi4/pi5/cm4/cm5); fertige A/B-/OTA-Layouts (`image-rota`), SBOM-/
+  CVE-Berichte; PMAP/Image-Description für `rpi-sb-provisioner`
+- **Con:** **kein 1:1-Ersatz für pi-gens RPi-OS-Stages** — unser Image
+  hängt an pi-gen stage0–2 (RPi-OS-Trixie-Basis, First-User,
+  net-tweaks/`WPA_COUNTRY`, cloud-init); alles davon müsste auf
+  rpi-image-gen-Layer portiert werden (Baselayer `image-rpios`/`trixie-minbase`
+  vorhanden, Feintuning neu); formal unterstützte Hosts sind nur native
+  ARM64 (RPi OS/Debian Bookworm+Trixie) — der heutige x86_64-Docker-
+  Cross-Build ist dort QEMU-Sache und nicht formal unterstützt;
+  Build braucht Mount-Namespaces (`CAP_SYS_ADMIN`); Migrations-/
+  Doppelbetriebsaufwand für 05/06/07-Stages
+- **Skizze:**
+  ```
+  ros-pi-gen/
+  ├── rpi-image-gen/          # git-Submodul @ gepinntem Tag (z. B. v2.8.0)
+  ├── layer/                  # eigene Layer (analog stage-custom)
+  │   ├── robot-base/         #   Docker CE + Ansible (statt 05)
+  │   ├── robot-variant/      #   headless/desktop-Pakete (statt 06)
+  │   └── robot-accesspopup/  #   AccessPopup + Web-UI (statt 07)
+  └── robot.yaml              # device: pi5/rpi5, image: image-rpios, layer-Liste
+  ```
+  Build: `rpi-image-gen build -c robot.yaml` (nativ auf ARM64-Host oder
+  via QEMU/Container, dort mit Rechten für Mount-Namespaces)
+
 ### Bewertung / Empfehlung
 
 1. **Idee a** als schneller Zwischenschritt (Submodul + `setup.sh`):
@@ -140,6 +179,14 @@ anpassen — Locale, SSH, Docker-Repo, Ansible, eigene Pakete.
 4. **Idee c** nur bei Ablehnung von Submodulen (nachteilige Interaktion mit
    bestehenden CI-Systemen o. ä.).
 5. **Idee e** nur als Experiment-Pfad parallel zur Pipeline.
+6. **Idee f** wie e als Parallel-Experiment evaluieren, nicht als
+   kurzfristigen Ersatz (pi-gen liefert heute die OS-Basis, f müsste sie
+   erst nachbauen); strategisch beobachten: RPi richtet die
+   OS-Erstinbetriebnahme (Imager 2.0/cloud-init, siehe
+   [Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)) und
+   A/B-/OTA-/Secure-Boot-Themen auf der rpi-image-gen-Schiene aus —
+   mittelfristig könnte f die Pipeline ersetzen, wenn ein Rebuild der
+   OS-Basis in Layer-Form leistbar wird.
 
 ### Offene Fragen (Overlay)
 
@@ -280,6 +327,19 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 
 - [ ] ROS 2 im Image: eigene Stage (`07-ros2`) vs. Runtime-Provisioning
       (Bezug Robotic-ROS2/`ugv_ws`); Größen-/Versionsfrage klären
+- [ ] Imager-2.0-Kompatibilität des Custom-Images: **Use custom** ohne
+      Repository-JSON ⇒ OS-Customization (Hostname/Schul-WLAN/SSH) wird
+      ausgelassen (beabsichtigt, kein Bug) — betrifft den Schul-WLAN-Workflow
+      (WLAN-Anleitung, Hardware-Test B1). Wege: (a) Repository-JSON mit
+      `init_format` (Werteliste ohne Bindestrich: `none`/`systemd`/
+      `cloudinit`/`cloudinit-rpi`/`rpi-preseed`/`""`, formale Referenz
+      `doc/schema-notes.md` im rpi-imager-Repo) oder (b) manuelle cloud-init-
+      Dateien (`user-data`/`network-config`) auf der bootfs-Partition.
+      Zu prüfen: erfüllt unser Image (pi-gen `stage2/04-cloud-init`:
+      cloud-init + `rpi-cloud-init-mods`, per Imager-Files aktivierbar) die
+      Voraussetzungen (NoCloud/bootfs, Network Config V2/Netplan,
+      `cc_raspberry_pi`/`raspi-config-vendor`)? Recherche:
+      [Raspberry-Pi-Imager-2.0.md](Raspberry-Pi-Imager-2.0.md)
 - [ ] Ansible-Strategie: build-time (heute) vs. ansible-pull/cloud-init
       zur Laufzeit. Konkretes Beispiel aus rpi-robot-base prüfen: die
       fertige Rolle `robot_codeserver`
