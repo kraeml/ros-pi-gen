@@ -31,18 +31,18 @@ def test_q0b_pigen_commit_gepinnt(pack):
 
 
 def test_q0c_bau_log_enthaelt_accesspopup_stage(build_log_text):
-    skip_line = "Skip /pi-gen/stage2/07-accesspopup/01-run.sh (not executable)"
+    skip_line = "Skip /pi-gen/stage-custom/07-accesspopup/01-run.sh (not executable)"
     assert skip_line not in build_log_text, (
         "07-accesspopup/01-run.sh wurde wegen fehlendem Exec-Bit uebersprungen "
-        "-> AccessPopup ist NICHT im Image. Fix: chmod +x stage2/07-accesspopup/"
-        "01-run.sh (Overlay + pi-gen-Kopie), dann Rebuild."
+        "-> AccessPopup ist NICHT im Image. Fix: chmod +x stage-custom/"
+        "07-accesspopup/01-run.sh, dann Rebuild."
     )
-    assert "Begin /pi-gen/stage2/07-accesspopup/01-run.sh" in build_log_text, (
+    assert "Begin /pi-gen/stage-custom/07-accesspopup/01-run.sh" in build_log_text, (
         "Build-Log enthaelt keinen Lauf von 07-accesspopup/01-run.sh: das Image "
         "wurde vor der AccessPopup-Integration gebaut -> Rebuild noetig "
         "(siehe ros-pi-gen/README.md)."
     )
-    assert "End /pi-gen/stage2/07-accesspopup/01-run.sh" in build_log_text, (
+    assert "End /pi-gen/stage-custom/07-accesspopup/01-run.sh" in build_log_text, (
         "07-accesspopup/01-run.sh wurde nicht sauber abgeschlossen (Build abgebrochen?"
     )
 
@@ -113,15 +113,22 @@ REQUIRED_SUBSTAGES = [
     "/pi-gen/stage2/01-sys-tweaks",
     "/pi-gen/stage2/02-net-tweaks",
     "/pi-gen/stage2/04-cloud-init",
-    "/pi-gen/stage2/05-docker-ansible/01-run.sh",
-    "/pi-gen/stage2/05-docker-ansible/02-packages",
-    "/pi-gen/stage2/05-docker-ansible/03-run.sh",
-    "/pi-gen/stage2/06-variant",
-    "/pi-gen/stage2/07-accesspopup/00-packages",
-    "/pi-gen/stage2/07-accesspopup/01-run.sh",
+    "/pi-gen/stage-custom/prerun.sh",
+    "/pi-gen/stage-custom/05-docker-ansible/01-run.sh",
+    "/pi-gen/stage-custom/05-docker-ansible/02-packages",
+    "/pi-gen/stage-custom/05-docker-ansible/03-run.sh",
+    "/pi-gen/stage-custom/07-accesspopup/00-packages",
+    "/pi-gen/stage-custom/07-accesspopup/01-run.sh",
     "/pi-gen/export-image",
     "/pi-gen/export-image/05-finalise",
 ]
+
+# Variante als Sub-Stage-Praefix (06-variant-headless/-desktop, je nach
+# VARIANT-Auswahl beim Build); beide sind gueltig, genau eine muss gelaufen
+# sein. Alte Logs (Pre-stage-custom) nutzen /pi-gen/stage2/06-variant.
+VARIANT_SUBSTAGE_PATTERN = re.compile(
+    r"^/pi-gen/(stage-custom|stage2)/06-variant(-[a-z]+)?$"
+)
 
 
 def test_q0f_bau_log_pflichtstufen(build_log_text):
@@ -131,6 +138,11 @@ def test_q0f_bau_log_pflichtstufen(build_log_text):
     fehlt_end = [t for t in REQUIRED_SUBSTAGES if t in begins and t not in ends]
     assert not fehlt_begin, f"Pflichtstufen nie gestartet: {fehlt_begin}"
     assert not fehlt_end, f"Pflichtstufen ohne End: {fehlt_end}"
+    variant_stages = [t for t in begins if VARIANT_SUBSTAGE_PATTERN.match(t)]
+    assert variant_stages, (
+        "Keine Varianten-Sub-Stage (06-variant*) im Build-Log — "
+        "Paketlisten-Stufe fehlt (make VARIANT=headless|desktop)."
+    )
 
 
 def test_q0g_bau_log_installationsnachweis(build_log_text):

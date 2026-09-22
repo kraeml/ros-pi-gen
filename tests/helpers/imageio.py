@@ -46,7 +46,11 @@ def tests_dir() -> Path:
 
 def deploy_dirs() -> list[Path]:
     repo_root = tests_dir().parent
-    return [repo_root.parent / "pi-gen" / "deploy", repo_root / "deploy"]
+    return [
+        repo_root.parent / "pi-gen" / "deploy",  # Legacy: Clone als Geschwister
+        repo_root / "pi-gen" / "deploy",         # nativer Build (cwd pi-gen)
+        repo_root / "deploy",                    # Docker-Build via make build
+    ]
 
 
 def discover_image() -> Path:
@@ -66,8 +70,8 @@ def discover_image() -> Path:
         ]
     if not candidates:
         raise FileNotFoundError(
-            "Kein Image gefunden (pi-gen/deploy bzw. ros-pi-gen/deploy). "
-            "Image bauen (siehe ros-pi-gen/README.md) oder PIGEN_TEST_IMAGE setzen."
+            "Kein Image gefunden (deploy/, pi-gen/deploy). "
+            "Image bauen (make build, siehe README.md) oder PIGEN_TEST_IMAGE setzen."
         )
     return max(candidates, key=lambda p: p.stat().st_mtime)
 

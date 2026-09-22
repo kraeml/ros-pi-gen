@@ -11,7 +11,9 @@ import pytest
 
 from helpers import container
 
-FILES_DIR = Path(__file__).resolve().parent.parent / "stage2" / "07-accesspopup" / "files"
+FILES_DIR = (
+    Path(__file__).resolve().parent.parent / "stage-custom" / "07-accesspopup" / "files"
+)
 
 SCRIPT = """set -e
 cp /src/accesspopup.conf /etc/accesspopup.conf

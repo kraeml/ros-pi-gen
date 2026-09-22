@@ -2,3 +2,12 @@ tests/.work/
 __pycache__/
 .pytest_cache/
 .venv/
+
+# Build-Erzeugnisse (make build: work via Docker-Mount, deploy via docker cp;
+# nativ via WORK_DIR/DEPLOY_DIR)
+/work/
+/deploy/
+
+# Varianten-Umschalter (make VARIANT=… — make setup setzt sie zurück)
+stage-custom/06-variant-headless/SKIP
+stage-custom/06-variant-desktop/SKIP
