@@ -15,17 +15,21 @@ Idee b).
 **Schnellstart:**
 
 ```bash
-git submodule update --init   # pi-gen @ gepinntem Commit holen
+git submodule update --init   # pi-gen + robotics-lab-vm @ gepinnten Commits holen
 make setup && make build      # Docker-Build, headless (Default)
 make test                     # Testinfra gegen deploy/
 ```
 
 **Empfohlener Weg:** Build mit Docker — der `debian:trixie`-Container bringt
 Keyring, debootstrap und qemu aktuell mit, auf dem Host ist nur Docker Engine
-nötig. Der native Build ist die Rückfallebene ohne Docker (→
-[Nativer Build](#nativer-build-ohne-docker)). Als alternative,
-RPi-offizielle Build-Pipeline mit deklarativer YAML-Konfiguration wird
-außerdem `rpi-image-gen` diskutiert (→
+nötig; ältere Hosts (hier: Ubuntu 20.04 mit qemu 4.2.1) werden über das
+binfmt Version-Gate bedient (temporärer Container-qemu-Entry, trap-gesichert
+geräumt — Details: [TODO.md](TODO.md), Block 3). Auf modernen Hosts (≥ qemu 8)
+greift das Gate nicht ein. Der native Build ist die Rückfallebene ohne Docker
+(→ [Nativer Build](#nativer-build-ohne-docker)), als Build-Umgebung mit
+moderner qemu ohne Kernel-Eingriff dient die [Vagrant-VM](#build-in-der-vm-robotics-lab-vm)
+(Ubuntu 24.04). Als alternative, RPi-offizielle Build-Pipeline mit
+deklarativer YAML-Konfiguration wird außerdem `rpi-image-gen` diskutiert (→
 [Eigene-Raspberry-Pi-Images-rpi-image-gen.md](Eigene-Raspberry-Pi-Images-rpi-image-gen.md),
 Einordnung in [TODO.md](TODO.md), Block 1). Einen geplanten CI-Lauf
 (GitHub Actions: Build + Test + Imager-2.0-Repository-JSON, auch lokal
@@ -206,6 +210,48 @@ setzt `make build ENGINE=native` `STAGE_LIST` (absolute Pfade auf
 der Aufruf-cwd `pi-gen/` ist nötig, damit pi-gen den Submodul-Commit
 (`GIT_HASH`, landet in der `.info`-Datei) und nicht den ros-pi-gen-Commit
 vermerkt; die Testinfra prüft genau diesen Pin (Q0b).
+
+## Build in der VM (robotics-lab-vm)
+
+Alternative Build-Umgebung: eine Ubuntu-24.04-VM ([robotics-lab-vm](https://codeberg.org/kraeml/robotics-lab-vm),
+als git-Submodul unter `vm/robotics-lab-vm` eingebunden, gesteuert per
+Vagrant/VirtualBox). Der Grund: der Build-Host hier ist Ubuntu 20.04 mit
+qemu-user-static 4.2.1, dessen binfmt-Emulation OFD-Dateisperren nicht
+unterstützt (Details: [TODO.md](TODO.md), Block 3) — `make build` umgeht
+das per temporärem binfmt-Entry. In der VM (qemu-user-static ≥ 8) greift
+das **Version-Gate** (`tools/binfmt.sh`): der Kernel bleibt **komplett
+unangetastet**, kein Entry wird gesetzt. Plus CI-Parität — GitHub-Runner
+fahren ebenfalls 24.04.
+
+Die Box `ubuntu-2404-desktop` (26.09.11, lokal registriert — kein
+Download) bringt Docker CE, qemu-user-static und binfmt-support bereits
+mit; die `robot_pigen`-Rolle der Box bleibt bewusst **ungenutzt** (sie
+implementiert das alte Overlay-Verfahren mit anderem pi-gen-Pin) — der
+stage-custom-Workflow dieses Repos kommt per `vm-sync` mit.
+
+```bash
+make vm-up vm-bootstrap vm-sync   # VM starten, prüfen, Repo übertragen (~5 MB)
+make vm-build                     # Setup + Docker-Build in der VM (~1 h)
+make vm-test                      # Gruppe Q in der VM (Docker + binfmt dort)
+make vm-artifacts                 # Image + Logs holen → deploy/vm/
+# oder alles: make vm-ci
+```
+
+- **SSH:** `make vm-ssh` (passwortlos, `vagrant ssh`); code-server unter
+  `http://192.168.33.10:8080` (Passwort `change_me`), JupyterLab unter
+  `:8888`. Das Repo liegt in der VM unter `~/build/ros-pi-gen` — bewusst
+  **nicht** im geteilten Ordner (vboxsf ist für Builds zu langsam).
+- **Disk:** `VM_DISK=80GB` (Default) einmalig beim ersten `vm-up` —
+  Vagrant vergrößert die Box-Disk einmalig; später ändern heißt
+  `make vm-destroy` + neu. Bedarf: Box ~18 GB + Build 20–40 GB +
+  Testcache ~12 GB.
+- **Varianten/Iteration:** `make vm-build VARIANT=desktop`,
+  `make vm-build CONTINUE=1` — dieselben Variablen wie beim Host-Build,
+  sie fließen durch.
+- **Erste Docker-Nutzung in frischer SSH-Session:** falls `docker ps`
+  mit „permission denied" antwortet, einmal neu einloggen (`exit` +
+  `make vm-ssh`) oder `newgrp docker` — die Gruppenmitgliedschaft greift
+  pro Login-Session.
 
 ## Variante wählen (headless vs. desktop)
 
@@ -424,7 +470,10 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 | `stage-custom/06-variant-headless/` | Headless-Pakete (openssh-server, network-manager); wird per SKIP-Datei aktiviert (Default) |
 | `stage-custom/06-variant-desktop/` | Desktop-Pakete (xfce4, lightdm, xserver-xorg); `01-run.sh` aktiviert LightDM bedingungslos — Existenz der Sub-Stage = Schalter |
 | `stage-custom/07-accesspopup/` | AccessPopup (AP-Fallback, gepinnt `ba6eff1…`, GPL-3.0) + Web-UI + Captive-Redirect + nftables-Isolation + hostname-SSID; Details im [AccessPopup-Abschnitt](#accesspopup--wlan-ap-fallback-mit-web-ui) |
-| `Makefile` | Thin-Wrapper: `venv lint setup build test ci` (identisch lokal wie in CI, siehe [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2) |
+| `Makefile` | Thin-Wrapper: `venv lint setup build test ci` (identisch lokal wie in CI, siehe [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2) + VM-Targets (`vm-*`, siehe [Build in der VM](#build-in-der-vm-robotics-lab-vm)) |
+| `tools/binfmt.sh` | qemu-Emulation-Entry: Version-Gate (Host-qemu ≥ 8 → kein Eingriff) + temporärer Container-qemu-Entry für ältere Hosts |
+| `tools/build-docker.sh` | Build-Orchestrierung: binfmt-Entry setzen → build-docker.sh → cleanup immer (trap EXIT/INT/TERM, Ctrl+C inklusive) |
+| `vm/robotics-lab-vm/` | git-Submodul ([robotics-lab-vm](https://codeberg.org/kraeml/robotics-lab-vm)) — Vagrant-VM Ubuntu 24.04 als Build-Umgebung (siehe [Build in der VM](#build-in-der-vm-robotics-lab-vm)) |
 | `work/`, `deploy/` | Build-Erzeugnisse (gitignored): pi-gen-Arbeitsverzeichnis bzw. Image + `build-docker.log` |
 
 ## Konventionen

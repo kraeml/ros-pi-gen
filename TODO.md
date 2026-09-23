@@ -335,28 +335,38 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       ist aus dem Test-Cache geräumt, Rest hierfür Hypothese).
       **Beschlossen — zwei Gleise (2026-09-23):**
       - **(a) Repo-interner Fix (umgesetzt, Feature
-        `stage-custom-build`):** `make build` (Docker) registriert für
-        die Dauer des Laufs einen temporären binfmt-Entry
-        `qemu-aarch64-rpi` auf das **moderne qemu 10.x aus dem
-        pi-gen-Container** (F-Flag; Cleanup danach immer, auch bei
-        Fehler) — kein dauerhafter Host-Eingriff. Der temporäre Entry
-        ist kernel-global; Reboot räumt ohnehin auf. Zusatzbefund:
-        pi-gens eigener Fallback-String in `build-docker.sh` ist defekt
-        (24-Byte-Magic vs. 20-Byte-Mask → EINVAL; bash-echo interpretiert
-        `\x` ohnehin nicht) → eigener Registrierungsweg nötig
-        (`tools/binfmt.sh`, Targets `binfmt-setup`/`binfmt-cleanup`).
-      - **(b) Ubuntu-Vagrant-VM (24.04) als künftige Build-Umgebung**
-        (CI-Parität: ubuntu-latest = 24.04): Infrastruktur vorhanden —
-        Box `ubuntu-2404-desktop` 26.09.11 lokal registriert, Rollen
-        `robot_docker`/`robot_pigen` in der Box-Provisionierung
-        ([../Ubuntu-Vagrant](../Ubuntu-Vagrant)), Vagrant 2.4.6 +
-        VirtualBox 7.0.26. qemu-user-static 8.x in der VM emuliert OFD
-        korrekt → **kein binfmt-Entry nötig**. Vorarbeiten (offen):
-        Feature-Branch in die VM transferieren (Branch existiert nur
-        lokal), `robot_pigen`-Rolle auf stage-custom-Modus + Pin
-        `74d08a3` umstellen (aktuell Overlay-copy-Verfahren + Pin
-        `86919da`), `DISK_SIZE=80GB` (pi-gen 20–40 GB + Testcache
-        ~12 GB; Default 64 GB).
+        `stage-custom-build`):** `make build` (Docker) nutzt den
+        Wrapper `tools/build-docker.sh`: binfmt **Version-Gate** —
+        aktiver Host-Interpreter mit qemu ≥ 8 emuliert OFD korrekt →
+        kein Entry, kein Docker-Aufruf, kein Kernel-Eingriff; älterer
+        (hier: 4.2.1) oder fehlender Interpreter → temporärer binfmt-
+        Entry `qemu-aarch64-rpi` auf das moderne qemu 10.x aus dem
+        pi-gen-Container (F-Flag; cleanup per trap EXIT/INT/TERM — auch
+        bei Ctrl+C; nur SIGKILL entgeht, Selbstheilung im nächsten
+        setup). Der temporäre Entry ist kernel-global; Reboot räumt
+        ohnehin auf. Zusatzbefunde: pi-gens eigener Fallback-String in
+        `build-docker.sh` ist defekt (24-Byte-Magic vs. 20-Byte-Mask →
+        EINVAL; bash-echo interpretiert `\x` ohnehin nicht) → eigener
+        Registrierungsweg nötig (`tools/binfmt.sh`, Targets
+        `binfmt-setup`/`binfmt-cleanup`).
+      - **(b) Ubuntu-24.04-VM (umgesetzt, Feature `stage-custom-build`):**
+        Build-Umgebung = [robotics-lab-vm](https://codeberg.org/kraeml/robotics-lab-vm)
+        als git-Submodul (`vm/robotics-lab-vm`, Vagrant/VirtualBox); Box
+        `ubuntu-2404-desktop` 26.09.11 lokal registriert (Quelle:
+        [../Ubuntu-Vagrant](../Ubuntu-Vagrant)-Box-Build) mit Docker CE,
+        qemu-user-static (8.x) und binfmt-support eingebacken —
+        qemu 8.x emuliert OFD korrekt, das binfmt **Version-Gate**
+        überspringt den Entry in der VM komplett (Kernel bleibt
+        unangetastet). Targets: `vm-up/vm-bootstrap/vm-sync/vm-build/
+        vm-test/vm-artifacts/vm-ssh/vm-halt/vm-destroy/vm-ci`
+        (`VM_DISK=80GB` einmalig beim ersten vm-up). Repo-Transfer per
+        `vm-sync` (rsync ~5 MB inkl. `.git` + pi-gen-Tree) — der lokal
+        existierende Feature-Branch kommt **ohne Push** in die VM; das
+        Repo liegt dort unter `~/build/ros-pi-gen` (VM-Disk, bewusst
+        nicht im langsamen vboxsf-Mount). Die `robot_pigen`-Rolle der Box
+        (altes Overlay-Verfahren + Pin `86919da`) bleibt bewusst
+        **ungenutzt** — der stage-custom-Workflow kommt per vm-sync mit.
+        **Offen:** erster reale VM-Lauf (`make vm-ci`).
       - Native Builds auf 20.04 bleiben riskant (README: Trixie braucht
         aktuellen Host) — der Docker-Pfad ist der maßgebliche;
         Alternative für native: Host-`qemu-user-static` aktualisieren
@@ -373,6 +383,16 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       ein Breaking-Release bringt; ggf. `pip-compile`/Lock-Datei einführen
 
 **Erledigt (Archiv):**
+
+- [x] Stale-Overlay-config verschattet stage-custom (Docker-Build, belegt
+      2026-09-23): `make setup MODE=overlay` rendert `pi-gen/config` —
+      stage-custom-setup räumte sie bislang nicht weg; build.sh sourced
+      sie im Container **vor** `-c /config`, ihr `STAGE_LIST` (ohne
+      stage-custom) gewinnt über den `${STAGE_LIST:-…}`-Soft-Default der
+      Repo-Config → stage-custom lief nie, kein Export, Exit 0 (stummer
+      Fehlschlag). Fix: `make setup` (stage-custom) entfernt
+      `pi-gen/config` + Assertion; die config ist in pi-gen gitignored —
+      der Submodul-Status zeigt sie nicht an.
 
 - [x] Dev-Build-Workflow dokumentieren: schnelle Iteration über pi-gens
       eigenen Mechanismus (pi-gen-README „Skipping stages to speed up
