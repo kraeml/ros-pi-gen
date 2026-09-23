@@ -39,11 +39,15 @@ VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 PIGEN_DOCKER_OPTS := --volume $(STAGE_DIR):/pi-gen/stage-custom:ro \
                      --volume $(WORK_DIR):/pi-gen/work
 
-# shellcheck-Dateisatz: build- und setup-Skripte der Stage. Nicht gescannt:
-# config (sourced von pi-gen mit set -u; die Variablen sind pi-gen-seitig
-# belegt — SC2034/SC2148-Mehrheit) und die vendor'ten AccessPopup-Skripte
-# (unverändert, siehe stage-custom/07-accesspopup/files/VENDORED.md).
-SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) $(STAGE_DIR)/prerun.sh
+# shellcheck-Dateisatz: build- und setup-Skripte der Stage + Wrapper.
+# Nicht gescannt: config (sourced von pi-gen mit set -u; die Variablen sind
+# pi-gen-seitig belegt — SC2034/SC2148-Mehrheit) und die vendor'ten
+# AccessPopup-Skripte (unverändert, siehe
+# stage-custom/07-accesspopup/files/VENDORED.md).
+SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) \
+               $(STAGE_DIR)/prerun.sh \
+               $(REPO_ROOT)/tools/binfmt.sh \
+               $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help venv lint setup build test ci clean-variant-skips clean-container clean-work
@@ -54,15 +58,14 @@ help:
 	@echo "ros-pi-gen — Thin-Wrapper (Details: README.md, GitHub-Image-Workflow.md)"
 	@echo
 	@echo "  make venv                     venv + Testabhängigkeiten anlegen"
-	@echo "  make lint                     shellcheck + Overlay-Tests (ohne Docker/Image)"
+	@echo "  make lint                     shellcheck (Stage + Wrapper) + Overlay-Tests"
 	@echo "  make setup                    pi-gen vorbereiten (MODE=stage-custom|overlay, VARIANT=…)"
 	@echo "  make build                    Image bauen (ENGINE=docker|native, VARIANT=…)"
 	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
-	@echo "  make binfmt-setup|cleanup     qemu-Emulation-Entry (Container-qemu, F-Flag) setzen/entfernen"
-	@echo
+	@echo "  make binfmt-setup|cleanup     qemu-Emulation-Entry (Container-qemu, F-Flag) setzen/entfernen"	@echo
 	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren)
@@ -79,13 +82,20 @@ lint: venv guard-pigen
 	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_hostname_ssid.py -q
 
 # --- setup ------------------------------------------------------------------
-# Entfernt Overlay-Reste aus pi-gens stage2 (Rückstände eines MODE=overlay-
-# Laufs würden in stage-custom sonst doppelt/falsch ausgeführt).
+# Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs
+# würden in stage-custom sonst doppelt/falsch ausgeführt). KRITISCH ist
+# pi-gen/config: build.sh sourced es im Container VOR -c /config — ein
+# Stale-Overlay-Stand (STAGE_LIST ohne stage-custom) würde über den
+# ${STAGE_LIST:-…}-Soft-Default der Repo-Config gewinnen, stage-custom
+# lief nie (stummer Fehlschlag, Beleg: Build-Log 2026-09-23). Die config
+# ist in pi-gen gitignored — der Submodul-Status zeigt sie nicht an.
 setup: guard-pigen clean-variant-skips
 ifeq ($(MODE),stage-custom)
 	@rm -f $(PIGEN_DIR)/stage2/SKIP_IMAGES
 	@touch $(PIGEN_DIR)/stage2/SKIP_IMAGES
 	@rm -rf $(PIGEN_DIR)/stage2/05-docker-ansible $(PIGEN_DIR)/stage2/06-variant* $(PIGEN_DIR)/stage2/07-accesspopup
+	@rm -f $(PIGEN_DIR)/config
+	@test ! -f $(PIGEN_DIR)/config || { echo "pi-gen/config ließ sich nicht entfernen — Stale-Overlay-Stand würde stage-custom verschatten" >&2; exit 1; }
 	@$(MAKE) --no-print-directory apply-variant
 	@echo "setup: MODE=stage-custom — pi-gen @ $$(git -C $(PIGEN_DIR) rev-parse --short HEAD), stage2 exportiert nicht, stage-custom exportiert ($(VARIANT))"
 else ifeq ($(MODE),overlay)
@@ -114,14 +124,15 @@ clean-variant-skips:
 	@rm -f $(foreach s,$(VARIANT_STAGES),$(STAGE_DIR)/$(s)/SKIP)
 
 # --- build ------------------------------------------------------------------
+# Docker-Weg: tools/build-docker.sh orchestriert binfmt-Entry (Version-Gate:
+# moderner Host-Interpreter -> kein Kernel-Eingriff) + trap-gesichertes
+# Cleanup (Ctrl+C inklusive) um build-docker.sh.
 build: guard-pigen guard-variant guard-container
 ifeq ($(ENGINE),docker)
 	@mkdir -p $(WORK_DIR) $(DEPLOY_DIR)
-	@tools/binfmt.sh setup
-	@rc=0; cd $(REPO_ROOT) && CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
+	@CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
 	  PIGEN_DOCKER_OPTS='$(PIGEN_DOCKER_OPTS)' \
-	  $(PIGEN_DIR)/build-docker.sh -c $(REPO_ROOT)/config || rc=$$?; \
-	  $(REPO_ROOT)/tools/binfmt.sh cleanup; exit $$rc
+	  tools/build-docker.sh
 else ifeq ($(ENGINE),native)
 	cd $(PIGEN_DIR) && sudo env \
 	  STAGE_LIST="$(PIGEN_DIR)/stage0 $(PIGEN_DIR)/stage1 $(PIGEN_DIR)/stage2 $(STAGE_DIR)" \
