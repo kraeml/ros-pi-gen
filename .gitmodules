@@ -2,3 +2,6 @@
 	path = pi-gen
 	url = https://github.com/RPi-Distro/pi-gen.git
 	branch = arm64
+[submodule "vm/robotics-lab-vm"]
+	path = vm/robotics-lab-vm
+	url = https://codeberg.org/kraeml/robotics-lab-vm.git
