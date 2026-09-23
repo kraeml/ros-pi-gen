@@ -325,6 +325,43 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       docker-ce-Version pinnen, Image-Benennung mit Datum +
       pi-gen-Commit-Kürzel
 
+- [ ] Build-Host: qemu-Emulation des alten Hosts bricht den Bootstrap —
+      Host = Ubuntu 20.04.6 (EOL), qemu-user-static **4.2.1**; dessen
+      binfmt-F-Flag-Emulation unterstützt OFD-Dateisperren nicht
+      (fcntl(F_OFD_SETLKW) → EINVAL, per QEMU_STRACE belegt 2026-09-23) →
+      systemd-Postinst (Trixie 257.13) scheitert im stage0-Bootstrap
+      („Failed to take /etc/passwd lock: Invalid argument"). Der Build vom
+      20.09 lief durch — Paketdrift (älterer systemd-Stand; das alte Image
+      ist aus dem Test-Cache geräumt, Rest hierfür Hypothese).
+      **Beschlossen — zwei Gleise (2026-09-23):**
+      - **(a) Repo-interner Fix (umgesetzt, Feature
+        `stage-custom-build`):** `make build` (Docker) registriert für
+        die Dauer des Laufs einen temporären binfmt-Entry
+        `qemu-aarch64-rpi` auf das **moderne qemu 10.x aus dem
+        pi-gen-Container** (F-Flag; Cleanup danach immer, auch bei
+        Fehler) — kein dauerhafter Host-Eingriff. Der temporäre Entry
+        ist kernel-global; Reboot räumt ohnehin auf. Zusatzbefund:
+        pi-gens eigener Fallback-String in `build-docker.sh` ist defekt
+        (24-Byte-Magic vs. 20-Byte-Mask → EINVAL; bash-echo interpretiert
+        `\x` ohnehin nicht) → eigener Registrierungsweg nötig
+        (`tools/binfmt.sh`, Targets `binfmt-setup`/`binfmt-cleanup`).
+      - **(b) Ubuntu-Vagrant-VM (24.04) als künftige Build-Umgebung**
+        (CI-Parität: ubuntu-latest = 24.04): Infrastruktur vorhanden —
+        Box `ubuntu-2404-desktop` 26.09.11 lokal registriert, Rollen
+        `robot_docker`/`robot_pigen` in der Box-Provisionierung
+        ([../Ubuntu-Vagrant](../Ubuntu-Vagrant)), Vagrant 2.4.6 +
+        VirtualBox 7.0.26. qemu-user-static 8.x in der VM emuliert OFD
+        korrekt → **kein binfmt-Entry nötig**. Vorarbeiten (offen):
+        Feature-Branch in die VM transferieren (Branch existiert nur
+        lokal), `robot_pigen`-Rolle auf stage-custom-Modus + Pin
+        `74d08a3` umstellen (aktuell Overlay-copy-Verfahren + Pin
+        `86919da`), `DISK_SIZE=80GB` (pi-gen 20–40 GB + Testcache
+        ~12 GB; Default 64 GB).
+      - Native Builds auf 20.04 bleiben riskant (README: Trixie braucht
+        aktuellen Host) — der Docker-Pfad ist der maßgebliche;
+        Alternative für native: Host-`qemu-user-static` aktualisieren
+        (trixie-.deb, analog zum Keyring-Rezept).
+
 - [ ] Größen-Budget: Build failt, wenn headless-Image über einer Schwelle
       (Wert noch festlegen, z. B. 2 GB unkomprimiert)
 
