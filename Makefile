@@ -46,7 +46,8 @@ PIGEN_DOCKER_OPTS := --volume $(STAGE_DIR):/pi-gen/stage-custom:ro \
 SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) $(STAGE_DIR)/prerun.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test ci clean-variant-skips clean-container
+.PHONY: help venv lint setup build test ci clean-variant-skips clean-container clean-work
+.PHONY: binfmt-setup binfmt-cleanup
 .PHONY: setup-stage-custom setup-overlay
 
 help:
@@ -59,6 +60,8 @@ help:
 	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
+	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
+	@echo "  make binfmt-setup|cleanup     qemu-Emulation-Entry (Container-qemu, F-Flag) setzen/entfernen"
 	@echo
 	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN)"
 
@@ -114,9 +117,11 @@ clean-variant-skips:
 build: guard-pigen guard-variant guard-container
 ifeq ($(ENGINE),docker)
 	@mkdir -p $(WORK_DIR) $(DEPLOY_DIR)
-	cd $(REPO_ROOT) && CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
+	@tools/binfmt.sh setup
+	@rc=0; cd $(REPO_ROOT) && CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
 	  PIGEN_DOCKER_OPTS='$(PIGEN_DOCKER_OPTS)' \
-	  $(PIGEN_DIR)/build-docker.sh -c $(REPO_ROOT)/config
+	  $(PIGEN_DIR)/build-docker.sh -c $(REPO_ROOT)/config || rc=$$?; \
+	  $(REPO_ROOT)/tools/binfmt.sh cleanup; exit $$rc
 else ifeq ($(ENGINE),native)
 	cd $(PIGEN_DIR) && sudo env \
 	  STAGE_LIST="$(PIGEN_DIR)/stage0 $(PIGEN_DIR)/stage1 $(PIGEN_DIR)/stage2 $(STAGE_DIR)" \
@@ -160,3 +165,24 @@ guard-container:
 # anonyme Volumes, bind-Mounts auf dem Host bleiben unberührt)
 clean-container:
 	@docker rm -v pigen_work 2>/dev/null && echo "Container pigen_work entfernt." || echo "Kein Container pigen_work vorhanden."
+
+# Partialles Bootstrap-RootFS (z. B. nach abgebrochenem Lauf) entfernen —
+# sonst überspringt stage0/prerun.sh den Bootstrap und der Build scheitert
+# später im unvollständigen rootfs (README-Troubleshooting). Die Dateien
+# gehören root (Build läuft im Container als root): erst normal rm, dann
+# per Container (pi-gen-Image, Repo-Root gemountet — work ist dort kein
+# Mountpoint), zuletzt sudo als Fallback.
+clean-work:
+	@rm -rf $(WORK_DIR) 2>/dev/null || \
+	  docker run --rm --volume $(REPO_ROOT):/repo pi-gen rm -rf /repo/work 2>/dev/null || \
+	  sudo rm -rf $(WORK_DIR)
+	@echo "work/ entfernt (Bootstrap baut frisch)."
+
+# qemu-Emulation-Entry (Container-qemu, F-Flag) — für den Docker-Build
+# automatisch gesetzt/entfernt; Standalone für manuelle/containerlose Läufe
+# (Details: tools/binfmt.sh-Kopf)
+binfmt-setup:
+	@tools/binfmt.sh setup
+
+binfmt-cleanup:
+	@tools/binfmt.sh cleanup

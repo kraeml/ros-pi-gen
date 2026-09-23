@@ -388,6 +388,24 @@ später im unvollständigen rootfs. Vor dem Neustart `work/<IMG_NAME>/stage0`
 löschen oder mit `make build ENGINE=native CLEAN=1` bauen – `CLEAN=1`
 entfernt `ROOTFS_DIR` vor `prerun.sh` und erzwingt einen frischen Bootstrap.
 
+### `Failed to take /etc/passwd lock: Invalid argument` (stage0-Bootstrap, Docker-Weg)
+
+Die systemd-Postinst im stage0-Bootstrap scheitert, wenn der
+binfmt-Interpreter ein **altes Host-qemu-user-static** ist (beobachtet:
+qemu 4.2.1 auf Ubuntu 20.04 — dessen fcntl-Emulation unterstützt
+OFD-Dateisperren (`F_OFD_SETLKW`) nicht und liefert EINVAL). `make build`
+registriert deshalb automatisch einen **temporären binfmt-Entry**
+(`qemu-aarch64-rpi`) auf das moderne qemu aus dem pi-gen-Container
+(trixie: 10.x) und räumt ihn nach dem Lauf wieder ab (auch bei Fehler);
+kein dauerhafter Host-Eingriff. Der Entry lässt sich händisch verwalten:
+`make binfmt-setup` / `make binfmt-cleanup` (`tools/binfmt.sh`).
+Alternativ (native Builds ohne Docker): `qemu-user-static` auf dem Host
+aktualisieren (z. B. das trixie-Paket, analog zum Keyring-Rezept oben).
+Zusatzbefund: pi-gens eigener Fallback-String in `build-docker.sh` ist
+unwirksam (24-Byte-Magic gegen 20-Byte-Mask → EINVAL) — daher der eigene
+Registrierungsweg; Details: [TODO.md](TODO.md), Block 3 (Build-Umgebung,
+zwei Gleise — u. a. Ubuntu-Vagrant-VM 24.04 als künftige Build-Umgebung).
+
 ### `arm64: not supported on this machine/kernel` (nativ)
 
 Cross-Build von x86_64 braucht `binfmt_misc` + qemu: `modprobe binfmt_misc`
