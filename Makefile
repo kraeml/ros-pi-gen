@@ -31,6 +31,18 @@ MODE     ?= stage-custom
 VARIANT  ?= headless
 ENGINE   ?= docker
 
+# --- VM-Build (robotics-lab-vm-Submodul, Details: README „Build in der VM") --
+# Ubuntu 24.04 in VirtualBox: qemu-user-static 8.x emuliert OFD korrekt —
+# das binfmt Version-Gate überspringt dort den Entry komplett (kein
+# Kernel-Eingriff). Das Repo landet per vm-sync auf der VM-Disk (nicht im
+# geteilten Ordner — vboxsf ist für Builds deutlich zu langsam).
+VAGRANT_DIR := $(REPO_ROOT)/vm/robotics-lab-vm
+VM_DISK     ?= 80GB           # einmalig beim ersten vm-up; später ändern = vm-destroy
+VM_USER     ?= vagrant
+VM_ADDR     ?= 192.168.33.10  # private_network aus dem Vagrantfile der Box
+VM_SSH_OPTS := -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+VM_DEST     := build/ros-pi-gen
+
 PIGEN_COMMIT    := 74d08a3
 VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 
@@ -53,6 +65,8 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
 .PHONY: help venv lint setup build test ci clean-variant-skips clean-container clean-work
 .PHONY: binfmt-setup binfmt-cleanup
 .PHONY: setup-stage-custom setup-overlay
+.PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
+.PHONY: vm-artifacts vm-halt vm-destroy vm-ci
 
 help:
 	@echo "ros-pi-gen — Thin-Wrapper (Details: README.md, GitHub-Image-Workflow.md)"
@@ -65,8 +79,16 @@ help:
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
-	@echo "  make binfmt-setup|cleanup     qemu-Emulation-Entry (Container-qemu, F-Flag) setzen/entfernen"	@echo
-	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN)"
+	@echo "  make binfmt-setup|cleanup     qemu-Emulation-Entry (Container-qemu, F-Flag) setzen/entfernen"
+	@echo
+	@echo "  VM (robotics-lab-vm, Ubuntu 24.04 — qemu 8.x, kein binfmt-Eingriff):"
+	@echo "  make vm-up|vm-ssh|vm-status   VM starten / betreten / Status"
+	@echo "  make vm-bootstrap|vm-sync     VM vorbereiten / Repo übertragen (~5 MB)"
+	@echo "  make vm-build|vm-test         Build/Test in der VM (VARIANT/CONTINUE fließen durch)"
+	@echo "  make vm-artifacts             deploy/ aus der VM holen (nach deploy/vm/)"
+	@echo "  make vm-halt|vm-destroy       VM anhalten / löschen · make vm-ci = ganze Kette"
+	@echo
+	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren)
 $(VENV)/bin/python: tests/requirements.txt
@@ -197,3 +219,75 @@ binfmt-setup:
 
 binfmt-cleanup:
 	@tools/binfmt.sh cleanup
+
+# --- VM (robotics-lab-vm-Submodul) ------------------------------------------
+# Build in der Ubuntu-24.04-VM: Container-qemu-Entry wird vom Version-Gate
+# übersprungen (VM-qemu 8.x emuliert OFD korrekt) — der VM-Kernel bleibt
+# unangetastet. Repo-Transfer per rsync auf die VM-Disk (vboxsf zu langsam
+# für Builds). ssh-Zugang: passwortlos via vagrant-Key (aus ssh-config).
+guard-vagrant:
+	@test -e $(VAGRANT_DIR)/.git || { echo "vm/robotics-lab-vm fehlt: git submodule update --init vm/robotics-lab-vm" >&2; exit 1; }
+	@command -v vagrant >/dev/null || { echo "vagrant nicht installiert" >&2; exit 1; }
+	@command -v rsync >/dev/null || { echo "rsync nicht installiert" >&2; exit 1; }
+
+vm-up: guard-vagrant
+	cd $(VAGRANT_DIR) && DISK_SIZE=$(VM_DISK) vagrant up
+
+vm-ssh: guard-vagrant
+	cd $(VAGRANT_DIR) && vagrant ssh
+
+vm-status: guard-vagrant
+	cd $(VAGRANT_DIR) && vagrant status
+
+# Bootstrap: Build-Abhängigkeiten (idempotent). Die Box 26.09.11 bringt
+# Docker CE + qemu-user-static bereits mit (Quelle: ../Ubuntu-Vagrant-
+# Box-Build) — der Check bestätigt und greift nur bei Lücken ein.
+vm-bootstrap: guard-vagrant
+	cd $(VAGRANT_DIR) && vagrant ssh -c 'set -e; \
+	  for p in rsync p7zip-full e2fsprogs python3-venv qemu-user-static binfmt-support; do \
+	    dpkg -s $$p >/dev/null 2>&1 || sudo apt-get install -y -qq $$p; \
+	  done; \
+	  if ! docker ps >/dev/null 2>&1; then \
+	    echo "vm-bootstrap: Docker fehlt/unerreichbar — installiere …"; \
+	    curl -fsSL https://get.docker.com | sudo sh; \
+	    sudo usermod -aG docker $$USER; \
+	    echo "vm-bootstrap: SSH-Session neu öffnen (docker-Gruppe greift erst dann)."; \
+	  else \
+	    echo "vm-bootstrap: Docker + qemu-user-static ok — bereit."; \
+	  fi'
+
+vm-sync: guard-vagrant
+	@sshcfg=$$(mktemp); \
+	  cd $(VAGRANT_DIR) && vagrant ssh-config > $$sshcfg; \
+	  key=$$(awk '/[[:space:]]*IdentityFile/{print $$2}' $$sshcfg | tail -1); \
+	  port=$$(awk '/[[:space:]]*Port[ \t]/{print $$2}' $$sshcfg | tail -1); \
+	  host=$$(awk '/[[:space:]]*HostName/{print $$2}' $$sshcfg | tail -1); \
+	  rm -f $$sshcfg; \
+	  vagrant ssh -c 'mkdir -p $(VM_DEST)' >/dev/null; \
+	  rsync -a --delete \
+	    --exclude work/ --exclude deploy/ --exclude .venv/ \
+	    --exclude tests/.work/ --exclude .opencode/ --exclude vm/ \
+	    -e "ssh -p $$port -i $$key $(VM_SSH_OPTS)" \
+	    $(REPO_ROOT)/ $(VM_USER)@$$host:$(VM_DEST)/
+	@echo "vm-sync: Repo nach $(VM_DEST) synchronisiert."
+
+vm-build: guard-vagrant
+	cd $(VAGRANT_DIR) && vagrant ssh -c 'set -e; cd $(VM_DEST); \
+	  make setup VARIANT=$(VARIANT) && make build VARIANT=$(VARIANT) CONTINUE=$(CONTINUE)'
+
+vm-test: guard-vagrant
+	cd $(VAGRANT_DIR) && vagrant ssh -c 'set -e; cd $(VM_DEST); make test'
+
+vm-artifacts: guard-vagrant
+	@mkdir -p $(DEPLOY_DIR)/vm
+	cd $(VAGRANT_DIR) && vagrant ssh -c 'tar -C $(VM_DEST)/deploy -czf - .' | tar -xzf - -C $(DEPLOY_DIR)/vm
+	@echo "vm-artifacts: deploy/vm/ befüllt (Image + Logs)."
+
+vm-halt: guard-vagrant
+	cd $(VAGRANT_DIR) && vagrant halt
+
+vm-destroy: guard-vagrant
+	cd $(VAGRANT_DIR) && vagrant destroy -f
+
+vm-ci: vm-up vm-bootstrap vm-sync vm-build vm-test
+	@echo "vm-ci: Kette abgeschlossen (Artefakte: make vm-artifacts)."
