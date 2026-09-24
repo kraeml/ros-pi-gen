@@ -48,6 +48,26 @@ pi-gen selbst (Stages, Config, Docker) liefert
 - **Beide Wege:** 20–40 GB Plattenplatz, Dauer 30 min bis mehrere Stunden;
   Pfad ohne Leerzeichen (debootstrap-Beschränkung).
 
+### qemu/binfmt nach Ubuntu-Version (Docker-Weg)
+
+Der arm64-Container läuft unter dem Host-qemu (binfmt_misc). Ob dafür ein
+temporärer Container-qemu-Entry nötig ist, hängt von der Host-qemu-Version
+ab — `make build` regelt das automatisch (Version-Gate `MIN_MAJOR=6`,
+tools/binfmt.sh): der Entry wird für den Lauf gesetzt und danach
+trap-geräumt; kein dauerhafter Host-Eingriff.
+
+| Host-OS | qemu-user-static | Build | Tests (Q1a) | binfmt-Entry |
+|---|---|---|---|---|
+| Ubuntu 20.04 (focal, EOL) | 4.2.1 | ✓ (via Container-qemu 10.x) | ✓ | **Ja** — temporär, automatisch geräumt |
+| Ubuntu 22.04 (jammy) | 6.2 | ✓ mit Host-qemu | ✓ mit Host-qemu (gemessen) | **Nein** |
+| Ubuntu 24.04 (noble) | 8.2.2 | ✓ mit Host-qemu | ✓ | **Nein** |
+
+Belege: Versionen-Matrix in [tests/README.md](tests/README.md) (gemessen
+2026-09-24, tools/q1a-probe.sh — 4.2.1 = Wedge, 6.2/8.2.2/10.x = grün);
+OFD-Fix-Schwelle = QEMU 5.1.0 (Launchpad 1893010, Commit 2d92c6827ca0).
+Nativer Weg: 22.04-Hinweis im
+[Nativen-Build-Abschnitt](#nativer-build-ohne-docker).
+
 ## Build mit Make (empfohlener Weg)
 
 Das Makefile im Repo-Root ist der Thin-Wrapper für Setup, Build und Test —
