@@ -21,11 +21,14 @@
 #
 # Ubuntu 24.04 registriert als Interpreter einen Symlink mit abweichendem
 # Namen (/usr/libexec/qemu-binfmt/aarch64-binfmt-P -> /usr/bin/qemu-
-# aarch64-static): der Debian-Patch im Binary verweigert Direktaufrufe
-# unter -binfmt-P-Namen ("has to be run using kernel binfmt-misc
-# subsystem") — deshalb löst das Gate den Pfad via readlink -f auf und
-# fragt die Version am echten Binary. Echte Wrapper-Skripte (#!) werden
-# geparst; unauflösbar -> fail-safe: registrieren.
+# aarch64-static): der Ubuntu-Patch im Binary verweigert Direktaufrufe
+# unter -binfmt-P-Namen — beobachtet (Live-Test 2026-09-24, verbatim:
+# "qemu: … has to be run using kernel binfmt-misc subsystem", rc 1;
+# Patch-Dokumentation nicht recherchiert) — deshalb löst das Gate den
+# Pfad via readlink -f auf und fragt die Version am echten Binary. Echte
+# Wrapper-Skripte (#!, Debian-Format: Shebang in Zeile 1, exec-Zeile in
+# Zeile 2) werden auf die Kopfzeilen begrenzt geparst; unauflösbar ->
+# fail-safe: registrieren.
 #
 # Bekannte Einschränkungen (bewusst dokumentiert statt verschwiegen):
 # - MIN_MAJOR=8 ist eine Beobachtung, kein verbriefender Changelog-Beleg:
@@ -67,44 +70,56 @@ active_interpreter() {
 }
 
 interpreter_major() {
-	# <binary> --version -> "qemu-aarch64 version 8.2.2 (…)"
-	# Unverständliches Format -> leerer Output -> Aufrufer fällt in den
-	# sicheren Fallback (registrieren statt überspringen).
+	# <binary> --version -> "qemu-aarch64 version 8.2.2 (…)" — 4.2.1 (der
+	# ursprüngliche Auslöser) liefert dasselbe Format, beide Fälle sind im
+	# Gate lebendig. Unverständliches Format -> leerer Output -> Aufrufer
+	# fällt in den sicheren Fallback (registrieren statt überspringen).
 	local out
 	out="$("$1" --version 2>/dev/null | head -1)" || return 1
 	echo "$out" | sed -n 's/.* version \([0-9][0-9]*\)\..*/\1/p'
 }
 
-# Interpreter-Pfad auflösen: Ubuntu 24.04 registriert -binfmt-P-Symlinks,
-# deren Ziel sich nicht direkt aufrufen lässt (Debian-Patch verlangt
-# binfmt_misc-Kontext) — deshalb das echte Binary hinter dem Symlink
-# verwenden; echte Wrapper-Skripte (#!) per exec-Zeile parsen.
-resolve_interpreter() {
-	local path="$1" resolved cand
-	resolved="$(readlink -f "$path" 2>/dev/null)" || resolved=""
-	if [ -n "$resolved" ] && major="$(interpreter_major "$resolved")" && [ -n "$major" ]; then
-		echo "$resolved"
+# Major-Version des effektiven Interpreters ermitteln (leer = unauflösbar
+# -> Aufrufer fällt in den sicheren Fallback). Sequenzielle Fallbacks:
+#   1. direkt: <interpreter> --version (z. B. Host 20.04: qemu-aarch64-static)
+#   2. Symlink auflösen: Ubuntu 24.04 registriert -binfmt-P-Symlinks, deren
+#      Ziel sich unter dem -binfmt-P-Namen nicht direkt aufrücken lässt
+#      (beobachtet: "has to be run using kernel binfmt-misc subsystem") —
+#      Version am echten Binary (readlink -f) fragen
+#   3. #-Skripte (Debian-Wrapper-Format: Shebang Zeile 1 OHNE qemu-Pfad,
+#      exec-Zeile Zeile 2 — Zeile-1-only-Parsen wäre daher wirkungslos):
+#      Suche auf die Kopfzeilen (head -n 3) begrenzt, um späte False-Hits
+#      in längeren Skripten auszuschließen (Review 2026-09-24)
+# Kein globaler Seiteneffekt: Major wird hier berechnet (local) und einmalig
+# zurückgegeben (Review: doppelte Berechnung/versteckte Abhängigkeit entfernt).
+effective_major() {
+	local path="$1" resolved cand m
+	m="$(interpreter_major "$path")" || m=""
+	if [ -n "$m" ]; then
+		echo "$m"
 		return 0
 	fi
-	if [ -f "$path" ] && head -c 2 "$path" | grep -q '#!'; then
-		cand="$(grep -a -m1 -o '/[A-Za-z0-9/_.-]*qemu-aarch64[A-Za-z0-9_.-]*' "$path")"
-		if [ -n "$cand" ] && [ -x "$cand" ] && major="$(interpreter_major "$cand")" && [ -n "$major" ]; then
-			echo "$cand"
-			return 0
-		fi
+	resolved="$(readlink -f "$path" 2>/dev/null)" || resolved=""
+	if [ -n "$resolved" ] && [ "$resolved" != "$path" ]; then
+		m="$(interpreter_major "$resolved")" || m=""
+		[ -n "$m" ] && { echo "$m"; return 0; }
+	fi
+	if [ -f "$path" ] && [ "$(head -c 2 "$path" 2>/dev/null)" = "#!" ]; then
+		# Alle Kandidaten der Kopfzeilen prüfen: ein inkommentierter Fake-Pfad
+		# (z. B. in einer Kommentarzeile) darf die exec-Zeile nicht verdrängen
+		# — erster Kandidat, der ausführbar ist UND eine Version liefert, gilt.
+		local m
+		while IFS= read -r cand; do
+			if [ -n "$cand" ] && [ -x "$cand" ]; then
+				m="$(interpreter_major "$cand")" || m=""
+				if [ -n "$m" ]; then
+					echo "$m"
+					return 0
+				fi
+			fi
+		done <<< "$(head -n 3 "$path" | grep -a -o '/[A-Za-z0-9/_.-]*qemu-aarch64[A-Za-z0-9_.-]*')"
 	fi
 	echo ""
-}
-
-# Major-Version des effektiven Interpreters ermitteln (leer = unauflösbar).
-effective_major() {
-	local resolved
-	resolved="$(resolve_interpreter "$1")"
-	if [ -n "$resolved" ]; then
-		interpreter_major "$resolved"
-	else
-		echo ""
-	fi
 }
 
 # docker ggf. per sudo (gleiches Fallback-Muster wie build-docker.sh).
