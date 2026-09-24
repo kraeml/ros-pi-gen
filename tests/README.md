@@ -140,6 +140,31 @@ Versuch mit qemu ≥ 9 wertvoll):
    `Result: resources`) — deshalb bleibt Q1a bewusst auf Boot-Zustand +
    exec-Zugang beschränkt.
 
+### qemu-user-Versionen-Matrix (Q1a-Probe)
+
+Empirische Schwelle für MIN_MAJOR (binfmt.sh-Version-Gate): denselben Q1a-
+Boot unter **verschiedenen qemu-Interpretern** fahren und beobachten, ab
+welcher Version der Container-Boot grün ist (statt der 8er-Annahme).
+
+```bash
+tools/q1a-probe.sh /tmp/qprobe/qemu-<version> <label>   # je Probe ~2–5 min
+```
+
+Pro-Lauf: Probe-Binary als temporärer binfmt-Entry (F-Flag, Bind-Mount in
+den pi-gen-Container — kein Host-root nötig), Q1a mit `PIGEN_TEST_NO_BINFMT=1`
++ `PIGEN_TEST_BOOT_TIMEOUT=300` (Wedges bounden), Klassifikation
+PASS/WEDGE/FAIL(-OFD), Entry-Cleanup.
+
+| Version | Quelle | Erwartung | Ergebnis |
+|---|---|---|---|
+| 4.2.1 | Ubuntu 20.04 (Host) | Negativkontrolle: Wedge (OFD, passwd-lock) | *Probe ausstehend* |
+| 6.2.0 | Ubuntu 22.04 (jammy) | OFD ok (≥ 5.1), Spawn-Grenze? („Warum kein QEMU“ Nr. 6) | *Probe ausstehend* |
+| 8.2.2 | Ubuntu 24.04 (noble) | ok (VM-Build-Beleg) | *Probe ausstehend* |
+| 10.0.13 | Debian trixie (pi-gen-Container) | Positivkontrolle: grün (67-passed-Lauf) | *Probe ausstehend* |
+
+Ergebnis → MIN_MAJOR auf die älteste empirisch grüne Version setzen (oder
+8 bestätigt); Wedge-Signaturen je Version dokumentieren.
+
 `pi-smoke.sh` am echten Gerät ist der saubere Ersatz: gleiche Prüfungen,
 echter Kernel, echte Peripherie.
 
