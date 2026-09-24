@@ -34,10 +34,10 @@ export PATH=/tmp/stub:$PATH
 grep '^ap_ssid=' /etc/accesspopup.conf
 """
 
-# Wechsel-Fall (Dispatcher-Analogie): Lauf 1 mit Hostnamen A, Lauf 2 mit
-# Hostnamen B — beweist, dass die SSID aus dem hostname-Befehl NEU berechnet
-# wird statt am bestehenden ap_ssid weiterzurechnen (sonst würde -AP-AP oder
-# der alte Name stehenbleiben).
+# Wechsel-Fall (Dispatcher-Analogie): EIN Container, die conf aus Lauf 1
+# bleibt für Lauf 2 bestehen — beweist, dass die SSID aus dem hostname-
+# Befehl NEU berechnet wird statt am bestehenden ap_ssid weiterzurechnen
+# (sonst würde -AP-AP oder der alte Name stehenbleiben).
 WECHSEL = ("roboter-07", "roboter-08")
 
 CASES = [
@@ -53,11 +53,45 @@ CASES = [
 ]
 
 
-def _run_case(host: str) -> str:
+# Wechsel-Template: EIN Container, conf bleibt zwischen den Läufen bestehen —
+# Lauf 2 erbt ap_ssid aus Lauf 1 (echter -AP-AP-Detektor, siehe Test unten).
+SCRIPT_WECHSEL = """set -e
+cp /src/accesspopup.conf /etc/accesspopup.conf
+mkdir -p /tmp/stub
+cat > /tmp/stub/hostname <<'STUBEOF'
+#!/bin/sh
+cat /tmp/host.txt
+STUBEOF
+chmod +x /tmp/stub/hostname
+export PATH=/tmp/stub:$PATH
+
+echo '{host_a}' > /tmp/host.txt
+/src/hostname-ssid.sh
+grep '^ap_ssid=' /etc/accesspopup.conf
+
+echo '{host_b}' > /tmp/host.txt
+/src/hostname-ssid.sh
+grep '^ap_ssid=' /etc/accesspopup.conf
+"""
+
+
+def _run_case(host: str) -> tuple[str, str, int]:
     script = SCRIPT.format(host=host)
     # Bewusst direkter subprocess statt helpers.container.run: der Lauf piped
     # das Skript per stdin (bash -s) — die Helper-Signatur (nur args, kein
     # input) deckt das nicht ab.
+    proc = subprocess.run(
+        [
+            "docker", "run", "--rm", "-i", "--platform", "linux/arm64",
+            "-v", f"{FILES_DIR}:/src:ro", "debian:trixie", "bash", "-s",
+        ],
+        input=script, capture_output=True, text=True, timeout=300,
+    )
+    return proc.stdout, proc.stderr, proc.returncode
+
+
+def _run_wechsel(host_a: str, host_b: str) -> tuple[str, str, int]:
+    script = SCRIPT_WECHSEL.format(host_a=host_a, host_b=host_b)
     proc = subprocess.run(
         [
             "docker", "run", "--rm", "-i", "--platform", "linux/arm64",
@@ -87,18 +121,25 @@ def test_hostname_ssid(host, expected):
 
 
 def test_hostname_ssid_wechsel():
-    # Hostnamenwechsel (reeller Fall: NM-Dispatcher-Action 'hostname'):
-    # Lauf 1 setzt SSID aus Hostnamen A, Lauf 2 MUSS aus Hostnamen B neu
-    # berechnen — der Test deckt den Fall ab, den der Doppellauf mit gleichem
-    # Hostnamen strukturell nicht unterscheiden kann.
+    # Echter -AP-AP-Detektor: EIN Container, die conf aus Lauf 1
+    # (ap_ssid='roboter-07-AP') bleibt für Lauf 2 bestehen. Nimmt das
+    # Skript versehentlich den bestehenden ap_ssid-Wert statt des
+    # hostname-Befehls als Eingabe, hängt Lauf 2 ein zweites '-AP' an
+    # oder behält den alten Namen — beides würde hier auffliegen.
+    #
+    # Negativprobe (2026-09-24): gemutete Skript-Kopie (h aus der bestehenden
+    # ap_ssid-Zeile statt hostname, -AP nicht gestrippt) → Wechsel-Test rot
+    # mit ap_ssid='apssidapssidaccesspopup-ap-AP' statt 'roboter-08-AP' —
+    # bestätigt Detektor-Qualität. Änderung zurückgesetzt, nicht Teil der
+    # Suite.
     _skip_docker()
-    stdout1, stderr1, rc1 = _run_case(WECHSEL[0])
-    assert rc1 == 0, f"rc={rc1}\nstderr:\n{stderr1}"
-    assert stdout1.strip() == f"ap_ssid='{WECHSEL[0]}-AP'", stdout1.strip()
+    stdout, stderr, rc = _run_wechsel(*WECHSEL)
+    assert rc == 0, f"rc={rc}\nstderr:\n{stderr}"
 
-    stdout2, stderr2, rc2 = _run_case(WECHSEL[1])
-    assert rc2 == 0, f"rc={rc2}\nstderr:\n{stderr2}"
-    assert stdout2.strip() == f"ap_ssid='{WECHSEL[1]}-AP'", (
-        f"SSID folgt dem Hostnamenwechsel nicht (alter Wert: {stdout1.strip()!r}, "
-        f"neuer Lauf: {stdout2.strip()!r})"
+    zeilen = stdout.strip().splitlines()
+    assert len(zeilen) == 2, f"Erwartet 2 Zeilen (Lauf 1 + Lauf 2), erhalten: {zeilen!r}"
+    lauf1, lauf2 = zeilen
+    assert lauf1 == f"ap_ssid='{WECHSEL[0]}-AP'", lauf1
+    assert lauf2 == f"ap_ssid='{WECHSEL[1]}-AP'", (
+        f"SSID folgt dem Hostnamenwechsel nicht (Lauf 1: {lauf1!r}, Lauf 2: {lauf2!r})"
     )
