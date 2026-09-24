@@ -1,6 +1,8 @@
 """Overlay-Guard: prueft die Stage-Dateien direkt im Overlay-Repo (ohne Image).
 Fängt Fehler ab, die sonst erst im Build-Log sichtbar wären – z. B. das
 fehlende Exec-Bit an NN-run.sh (pi-gen skippt die Stage dann stillschweigend).
+Bewusst nur statische Struktur-/Permissions-Checks; tiefere Skript-Prüfung
+(shellcheck) läuft separat via make lint.
 """
 
 from __future__ import annotations
@@ -53,8 +55,8 @@ def test_overlay_varianten_konsistent():
     desktop = STAGE_CUSTOM / "06-variant-desktop" / "00-packages"
     fehlen = [str(p.relative_to(REPO_ROOT)) for p in (headless, desktop) if not p.is_file()]
     assert not fehlen, f"Varianten-Stages unvollständig: {fehlen}"
-    h = {l for l in headless.read_text().splitlines() if l and not l.startswith("#")}
-    d = {l for l in desktop.read_text().splitlines() if l and not l.startswith("#")}
+    h = {l.strip() for l in headless.read_text().splitlines() if l.strip() and not l.strip().startswith("#")}
+    d = {l.strip() for l in desktop.read_text().splitlines() if l.strip() and not l.strip().startswith("#")}
     assert h <= d, (
         f"headless-Pakete fehlen in der Desktop-Liste: {sorted(h - d)} "
         "(Varianten driften auseinander)"
@@ -75,8 +77,14 @@ def test_overlay_prerun_copy_previous():
     prerun = STAGE_CUSTOM / "prerun.sh"
     assert prerun.is_file(), "stage-custom/prerun.sh fehlt — stage-custom erhält kein stage2-RootFS."
     assert os.access(prerun, os.X_OK), "stage-custom/prerun.sh ohne Exec-Bit (pi-gen skippt sie still)."
-    assert "copy_previous" in prerun.read_text(), (
-        "stage-custom/prerun.sh ohne copy_previous — stage-custom baute auf leerem RootFS."
+    aktiv = [
+        l.strip()
+        for l in prerun.read_text().splitlines()
+        if l.strip() and not l.strip().startswith("#") and "copy_previous" in l
+    ]
+    assert aktiv, (
+        "stage-custom/prerun.sh ohne aktiven copy_previous-Aufruf "
+        "(nur auskommentiert?) — stage-custom baute auf leerem RootFS."
     )
 
 
@@ -87,7 +95,25 @@ def test_overlay_accesspopup_files_komplett():
         "AccessPopup.service.d/order.conf", "hostname-ssid.service", "hostname-ssid.sh",
         "dispatcher-90-accesspopup-portal", "dnsmasq-shared.d/01-wildcard.conf",
         "nft-accesspopup.rules", "acpu_web.service", "acpu_web_app.service",
-        "acpu_web_app.socket", "VENDORED.md",
+        "acpu_web_app.socket", "VENDORED.md", "LICENSE",
+        "acpu_web/acpu_get_std.py", "acpu_web/requirements.txt", "acpu_web/pages/app.py",
+        "acpu_web/pages/static/css/style.css",
+        "acpu_web/pages/static/img/change_accesspopup_details.png",
+        "acpu_web/pages/static/img/guide_home_img_buttons.png",
+        "acpu_web/pages/static/img/no_internet_warning.png",
+        "acpu_web/pages/templates/add_network.html",
+        "acpu_web/pages/templates/add_network_pw.html",
+        "acpu_web/pages/templates/add_nw_manual.html",
+        "acpu_web/pages/templates/ap_delete_confirm.html",
+        "acpu_web/pages/templates/ap_edit_details.html",
+        "acpu_web/pages/templates/ap_edit.html",
+        "acpu_web/pages/templates/component/footer.html",
+        "acpu_web/pages/templates/component/header.html",
+        "acpu_web/pages/templates/component/menu.html",
+        "acpu_web/pages/templates/core.html",
+        "acpu_web/pages/templates/guide.html",
+        "acpu_web/pages/templates/index.html",
+        "acpu_web/pages/templates/nw_edit_details.html",
     ]
     fehlt = [f for f in erwartet if not (files / f).is_file()]
     assert not fehlt, f"AccessPopup-Dateien fehlen im Overlay: {fehlt}"
