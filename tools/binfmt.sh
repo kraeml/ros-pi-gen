@@ -108,7 +108,6 @@ effective_major() {
 		# Alle Kandidaten der Kopfzeilen prüfen: ein inkommentierter Fake-Pfad
 		# (z. B. in einer Kommentarzeile) darf die exec-Zeile nicht verdrängen
 		# — erster Kandidat, der ausführbar ist UND eine Version liefert, gilt.
-		local m
 		while IFS= read -r cand; do
 			if [ -n "$cand" ] && [ -x "$cand" ]; then
 				m="$(interpreter_major "$cand")" || m=""
