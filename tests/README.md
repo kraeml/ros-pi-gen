@@ -34,7 +34,7 @@ idempotent darin und ruft pytest auf. Alternativ direkt:
 
 | Werkzeug | Wofür |
 |---|---|
-| Docker Engine + arm64-binfmt | Container-Tests (Q1a, Q2–Q9, hostname-SSID) — `docker run --platform linux/arm64 debian:trixie true` muss gehen |
+| Docker Engine + arm64-Emulation | Container-Tests (Q1a, Q2–Q9, hostname-SSID) — `docker run --platform linux/arm64 debian:trixie true` muss gehen; die Suite setzt den nötigen OFD-tauglichen Container-qemu-Entry **selbst** (Sessionstart, `tools/binfmt.sh setup` — gleicher Version-Gate-Mechanismus wie beim Build; auf qemu ≥ 8-Hosts No-op; Opt-out `PIGEN_TEST_NO_BINFMT=1`). Hintergrund: nach `make build` ist der Build-Entry entfernt und Host-qemu 4.x wedged systemd beim Q1a-Container-Boot (fcntl-OFD → EINVAL) |
 | `7z`, `debugfs` (e2fsprogs) | Boot-Partition entpacken, ext4 lesen (ohne Root) |
 | nftables-Hilfscontainer | Q6 (wird einmalig gebaut, dann gecached) |
 
@@ -52,7 +52,7 @@ Partitions-Slices, RootFS-Staging). `PIGEN_TEST_CACHE` überschreibbar;
 | Test | Protokoll | Prüft | Methode |
 |---|---|---|---|
 | `test_q0a–d` | – | Image vorhanden, pi-gen-Commit gepinnt (`74d08a3`), `07-accesspopup/01-run.sh` gelaufen (nicht geskippt), Log vollständig & zum Image passend | Build-Log + `.info` |
-| `test_q0e–g` | – | Build-Log: jedes `Begin` hat `End`, **kein `Skip`**, Pflichtstufen komplett (stage0–2 inkl. 05/06/07 + export-image), `Setting up docker-ce/ansible` + visudo-Beleg | Build-Log |
+| `test_q0e–g` | – | Build-Log: jedes `Begin` hat `End`, **kein `Skip`**, Pflichtstufen komplett (stage0–2 inkl. 05/06/07 + export-image), docker-ce/ansible-Installation belegbar (`Setting up …` bei Erstinstallation, `… is already the newest version` bei Wiederholungslauf mit persistiertem `work/`) + visudo-Beleg | Build-Log |
 | `test_q1a` | Q1 | systemd-Boot des RootFS im arm64-Container: `running`/`degraded` + exec-Zugang | Docker, privilegiert |
 | `test_image_files[*]` | – | Datei-Manifest: Overlay-Dateien im RootFS + Boot-Partition, Docker/Ansible-Binaries, Inhalts-Marker (`ap_pw`, `table ip accesspopup`, Redirect 8052, …) | debugfs |
 | `test_q2` | Q2 | `AccessPopup.timer` = `enabled` | Container |
@@ -136,6 +136,7 @@ echter Kernel, echte Peripherie.
 | `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen |
 | `PIGEN_TEST_BOOT_TIMEOUT` | `900` | Q1a: Sekunden bis systemd-Zustand |
 | `PIGEN_TEST_DOCKER_TIMEOUT` | `300` | Timeout je Container-Kommando |
+| `PIGEN_TEST_NO_BINFMT` | – | `1` = Container-qemu-Entry nicht selbst setzen/räumen (wenn der Host binfmt anderweitig managed) |
 | `PIGEN_TEST_VENV` | `ros-pi-gen/.venv` | venv für run_tests.sh |
 
 ## Wartung

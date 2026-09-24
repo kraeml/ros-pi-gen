@@ -146,9 +146,19 @@ def test_q0f_bau_log_pflichtstufen(build_log_text):
 
 
 def test_q0g_bau_log_installationsnachweis(build_log_text):
+    # Beleg akzeptiert beide apt-Stände: Erstinstallation ("Setting up …")
+    # und Wiederholungslauf mit persistiertem work/ ("already the newest
+    # version" — Paket ist dann bereits im RootFS installiert).
     for paket in ("docker-ce", "ansible"):
-        m = re.search(rf"Setting up {re.escape(paket)} \(", build_log_text)
-        assert m, f"'Setting up {paket}' nicht im Build-Log (Installation nicht belegbar)."
+        m = re.search(
+            rf"(Setting up {re.escape(paket)} \(|"
+            rf"{re.escape(paket)} is already the newest version \()",
+            build_log_text,
+        )
+        assert m, (
+            f"Weder 'Setting up {paket}' noch '{paket} is already the newest "
+            f"version' im Build-Log (Installation nicht belegbar)."
+        )
     assert re.search(r"/etc/sudoers\.d/acpu: parsed OK", build_log_text), (
         "visudo-Pruefung fehlt im Build-Log (Q8-Beleg)."
     )

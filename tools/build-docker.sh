@@ -32,6 +32,17 @@ docker image inspect pi-gen >/dev/null 2>&1 || \
 # maskieren (cleanup meldet seinen Fehlschlag selbst auf stderr).
 trap '"$BINFMT" cleanup || true' EXIT INT TERM
 
+# GIT_HASH: pi-gen schreibt ihn ins Image (etc/rpi-issue → *.info) und
+# nimmt ${GIT_HASH:-"$(git rev-parse HEAD)"} — also den Commit des CWD.
+# Der CWD hier ist der Repo-Root; ohne Export würde der Commit des
+# Wrappers (c54ac3a) statt des gepinnten Submoduls (74d08a3) landen
+# (Q0b). Fehlschlag (kein .git): ungesetzt lassen → pi-gen-Default.
+if _pigen_hash="$(git -C "$REPO_ROOT/pi-gen" rev-parse HEAD 2>/dev/null)"; then
+	export GIT_HASH="$_pigen_hash"
+else
+	echo "build-docker.sh: pi-gen-Commit nicht ermittelbar — .info ohne GIT_HASH" >&2
+fi
+
 rc=0
 cd "$REPO_ROOT" || exit 1
 CONTINUE="${CONTINUE:-0}" \

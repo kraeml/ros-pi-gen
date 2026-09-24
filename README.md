@@ -209,7 +209,10 @@ setzt `make build ENGINE=native` `STAGE_LIST` (absolute Pfade auf
 `DEPLOY_DIR` als Env-Variablen und ruft `build.sh` aus dem Submodul auf —
 der Aufruf-cwd `pi-gen/` ist nötig, damit pi-gen den Submodul-Commit
 (`GIT_HASH`, landet in der `.info`-Datei) und nicht den ros-pi-gen-Commit
-vermerkt; die Testinfra prüft genau diesen Pin (Q0b).
+vermerkt; die Testinfra prüft genau diesen Pin (Q0b). Der Docker-Weg
+(ENGINE=docker) hat denselben cwd (`ros-pi-gen/`) — dort exportiert
+`tools/build-docker.sh` `GIT_HASH` deshalb ausdrücklich aus dem Submodul,
+bevor `pi-gen/build-docker.sh` angetreten wird.
 
 ## Build in der VM (robotics-lab-vm)
 

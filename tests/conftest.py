@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +13,40 @@ from helpers import container, imageio
 
 BOOT_TIMEOUT = int(os.environ.get("PIGEN_TEST_BOOT_TIMEOUT", "900"))
 DOCKER_TIMEOUT = int(os.environ.get("PIGEN_TEST_DOCKER_TIMEOUT", "300"))
+
+BINFMT_SCRIPT = Path(__file__).resolve().parent.parent / "tools" / "binfmt.sh"
+
+
+def _binfmt(what: str) -> None:
+    proc = subprocess.run([str(BINFMT_SCRIPT), what])
+    if proc.returncode != 0:
+        print(
+            f"[Warnung] binfmt.sh {what} fehlgeschlagen (rc={proc.returncode}). "
+            "Q1a (systemd-Boot) braucht einen OFD-tauglichen arm64-Interpreter "
+            "(qemu >= 8, Container-Entry); unter altem Host-qemu (< 8) wedged "
+            "der Boot. pi-gen-Image vorhanden? (make build legt es an) "
+            "Opt-out: PIGEN_TEST_NO_BINFMT=1",
+            flush=True,
+        )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def binfmt_guard():
+    """arm64-Emulation für die Container-Tests sicherstellen.
+
+    make build registriert für die Build-Dauer einen modernen Container-qemu-
+    Entry (OFD-tauglich, tools/binfmt.sh Version-Gate) und entfernt ihn im
+    Trap VOR den Tests — danach würde alles arm64 unter dem Host-Interpreter
+    laufen (ggf. qemu 4.x: fcntl(F_OFD_SETLKW) → EINVAL, systemd wedged beim
+    Container-Boot, Q1a-Timeout). Die Suite setzt denselben Entry daher
+    selbst (identischer Mechanismus/Gate wie der Build; auf qemu >= 8-Hosts
+    No-op) und räumt ihn am Session-Ende wieder ab.
+    """
+    if not os.environ.get("PIGEN_TEST_NO_BINFMT"):
+        _binfmt("setup")
+    yield
+    if not os.environ.get("PIGEN_TEST_NO_BINFMT"):
+        _binfmt("cleanup")
 
 
 def pytest_configure(config):
