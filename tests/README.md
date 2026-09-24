@@ -15,7 +15,7 @@ python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
 
 ./run_tests.sh                    # Build-Host-Ebene: Q0 + Q1a + Q2–Q9 + Manifest
 ./run_tests.sh -k q5              # einzelner Test
-./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vorher leeren
+./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vor dem Lauf löschen
 
 # Hardware-Lauf (Gruppe Q final am echten Pi, read-only):
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
