@@ -241,6 +241,9 @@ make vm-artifacts                 # Image + Logs holen → deploy/vm/
   `http://192.168.33.10:8080` (Passwort `change_me`), JupyterLab unter
   `:8888`. Das Repo liegt in der VM unter `~/build/ros-pi-gen` — bewusst
   **nicht** im geteilten Ordner (vboxsf ist für Builds zu langsam).
+- **VM-Name:** `VM_NAME=ros-pi-gen` (Default im Makefile) — die Box-VM
+  fürs Unterrichtsmaterial heißt `robotics`; Parallelbetrieb kollidiert
+  nicht mehr (Vagrantfile liest `VM_NAME` aus der Umgebung).
 - **Disk:** `VM_DISK=80GB` (Default) einmalig beim ersten `vm-up` —
   Vagrant vergrößert die Box-Disk einmalig; später ändern heißt
   `make vm-destroy` + neu. Bedarf: Box ~18 GB + Build 20–40 GB +

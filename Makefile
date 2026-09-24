@@ -42,6 +42,7 @@ VM_USER     ?= vagrant
 VM_ADDR     ?= 192.168.33.10  # private_network aus dem Vagrantfile der Box
 VM_SSH_OPTS := -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 VM_DEST     := build/ros-pi-gen
+VM_NAME     ?= ros-pi-gen     # VirtualBox-Name; Default im Submodul-Vagrantfile: robotics
 
 PIGEN_COMMIT    := 74d08a3
 VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
@@ -88,7 +89,7 @@ help:
 	@echo "  make vm-artifacts             deploy/ aus der VM holen (nach deploy/vm/)"
 	@echo "  make vm-halt|vm-destroy       VM anhalten / löschen · make vm-ci = ganze Kette"
 	@echo
-	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK)"
+	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren)
 $(VENV)/bin/python: tests/requirements.txt
@@ -231,7 +232,7 @@ guard-vagrant:
 	@command -v rsync >/dev/null || { echo "rsync nicht installiert" >&2; exit 1; }
 
 vm-up: guard-vagrant
-	cd $(VAGRANT_DIR) && DISK_SIZE=$(VM_DISK) vagrant up
+	cd $(VAGRANT_DIR) && DISK_SIZE=$(VM_DISK) VM_NAME=$(VM_NAME) vagrant up
 
 vm-ssh: guard-vagrant
 	cd $(VAGRANT_DIR) && vagrant ssh
