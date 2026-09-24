@@ -12,6 +12,12 @@ def test_extras_docker_ce_inst(crun):
 
 
 def test_extras_ansible_inst(crun):
+    # Bewusst BEIDE Pakete gefordert: 02-packages (05-docker-ansible)
+    # installiert das Debian-Metapaket 'ansible', das ansible-core als
+    # harte Abhängigkeit mitzieht — beide sind also im Image. Der Test
+    # koppelt sich bewusst an diesen Installationspfad: ein Pfadwechsel
+    # (z. B. ansible-core-only oder pip) soll hier sichtbar scheitern und
+    # die Anpassung erzwingen, nicht still durchlaufen.
     for pkg in ("ansible", "ansible-core"):
         res = crun(["dpkg-query", "-W", "-f=${Status} ${Version}\n", pkg])
         assert res.rc == 0 and "install ok installed" in res.stdout, res.summary()
@@ -23,5 +29,11 @@ def test_extras_docker_service_enabled(crun):
 
 
 def test_extras_cloud_init_nicht_defekt(crun):
+    # Bewusst schwächer als der Name klingt: geprüft wird nur "nicht failed",
+    # NICHT "active" und NICHT der Exit-Code. cloud-init.service ist ein
+    # Oneshot — nach Boot-Abschluss typischerweise "inactive (dead)", wobei
+    # systemctl is-active dort bereits rc != 0 liefert; ein active/rc-Check
+    # würde also normale Abschlusszustände fälschlich failen. Ob der Boot
+    # wirklich läuft, deckt Q1a ab.
     res = crun(["systemctl", "is-active", "cloud-init.service"])
     assert res.stdout.strip() != "failed", res.summary()

@@ -124,6 +124,10 @@ echter Kernel, echte Peripherie.
   `visudo`-Binaries), Ownership via `tar --owner=0` beim Import normalisiert.
 - Q0 erwartet, dass der neueste Build-Log zum neuesten Image gehört
   (`build-docker.log`/`build.log` im selben Verzeichnis).
+- **extras/cloud-init** prüft bewusst nur „nicht failed" (Oneshot-Service,
+  nach Boot typ. inactive) — als spätere Verfeinerung böte
+  `cloud-init status` ein präziseres Signal (done/running/error/degraded,
+  meldet auch interne Fehler trotz „erfolgreich beendet").
 - Hardware-Gruppen A–D (AP-Verhalten, Captive Portal, Isolation, Mehrgeräte)
   bleiben manuell — die Automatisierung liefert nur Beobachtungen.
 
