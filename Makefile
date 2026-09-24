@@ -30,6 +30,7 @@ VENV       := $(REPO_ROOT)/.venv
 MODE     ?= stage-custom
 VARIANT  ?= headless
 ENGINE   ?= docker
+SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schnelle Iteration")
 
 # --- VM-Build (robotics-lab-vm-Submodul, Details: README „Build in der VM") --
 # Ubuntu 24.04 in VirtualBox: qemu-user-static 8.x emuliert OFD korrekt —
@@ -44,6 +45,9 @@ VM_SSH_OPTS := -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 VM_DEST     := build/ros-pi-gen
 VM_NAME     ?= ros-pi-gen     # VirtualBox-Name; Default im Submodul-Vagrantfile: robotics
 
+# pi-gen-Submodul-Pin (arm64-Branch). Regelmäßig auf Aktualität prüfen:
+#   git -C pi-gen fetch origin arm64 && git -C pi-gen log origin/arm64 -1
+# Updates nur per bewusster Pin-Änderung (nie automatisch — siehe README).
 PIGEN_COMMIT    := 74d08a3
 VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 
@@ -63,9 +67,8 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test ci clean-variant-skips clean-container clean-work
-.PHONY: binfmt-setup binfmt-cleanup
-.PHONY: setup-stage-custom setup-overlay
+.PHONY: help venv lint setup build test ci clean-container clean-work clean-variant-skips
+.PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
 
@@ -73,10 +76,12 @@ help:
 	@echo "ros-pi-gen — Thin-Wrapper (Details: README.md, GitHub-Image-Workflow.md)"
 	@echo
 	@echo "  make venv                     venv + Testabhängigkeiten anlegen"
-	@echo "  make lint                     shellcheck (Stage + Wrapper) + Overlay-Tests"
+	@echo "  make lint                     shellcheck (Stage + Wrapper) — schnelles Subset (Overlay-Tests + hostname-ssid), kein Volltestlauf"
 	@echo "  make setup                    pi-gen vorbereiten (MODE=stage-custom|overlay, VARIANT=…)"
-	@echo "  make build                    Image bauen (ENGINE=docker|native, VARIANT=…)"
-	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/"
+	@echo "  make build                    Image bauen (ENGINE=docker|native, VARIANT=…,"
+	@echo "                                CONTINUE=1 Weiterbau im Container (überspringt Stale-Guard),"
+	@echo "                                SKIP_IMAGES_BUILD=1 Iteration ohne Image-Export)"
+	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/ — Volltestlauf"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
@@ -89,7 +94,7 @@ help:
 	@echo "  make vm-artifacts             deploy/ aus der VM holen (nach deploy/vm/)"
 	@echo "  make vm-halt|vm-destroy       VM anhalten / löschen · make vm-ci = ganze Kette"
 	@echo
-	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP)"
+	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) SKIP_IMAGES_BUILD=$(SKIP_IMAGES_BUILD)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren).
 # Stamp-Datei statt bin/python als Target: touch folgt dem venv-Symlink zum
@@ -125,6 +130,7 @@ ifeq ($(MODE),stage-custom)
 	@$(MAKE) --no-print-directory apply-variant
 	@echo "setup: MODE=stage-custom — pi-gen @ $$(git -C $(PIGEN_DIR) rev-parse --short HEAD), stage2 exportiert nicht, stage-custom exportiert ($(VARIANT))"
 else ifeq ($(MODE),overlay)
+	@printf "[WARNUNG] MODE=overlay ist der Legacy-Weg (gerichtete cps, dirty Tree) — Default ist stage-custom.\n" >&2
 	@rm -f $(PIGEN_DIR)/stage2/SKIP_IMAGES
 	@cp -r $(STAGE_DIR)/05-docker-ansible $(STAGE_DIR)/07-accesspopup $(PIGEN_DIR)/stage2/
 	@rm -rf $(PIGEN_DIR)/stage2/06-variant-headless $(PIGEN_DIR)/stage2/06-variant-desktop
@@ -153,9 +159,13 @@ clean-variant-skips:
 # Docker-Weg: tools/build-docker.sh orchestriert binfmt-Entry (Version-Gate:
 # moderner Host-Interpreter -> kein Kernel-Eingriff) + trap-gesichertes
 # Cleanup (Ctrl+C inklusive) um build-docker.sh.
+# SKIP_IMAGES_BUILD=1: rm-first (self-healing bei fehlgeschlagenem SKIP-Lauf)
+# + touch für diesen Lauf — der nächste Normal-Build exportiert wieder.
 build: guard-pigen guard-variant guard-container
 ifeq ($(ENGINE),docker)
 	@mkdir -p $(WORK_DIR) $(DEPLOY_DIR)
+	@rm -f $(STAGE_DIR)/SKIP_IMAGES
+	@if [ -n "$(SKIP_IMAGES_BUILD)" ]; then touch $(STAGE_DIR)/SKIP_IMAGES; fi
 	@CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
 	  PIGEN_DOCKER_OPTS='$(PIGEN_DOCKER_OPTS)' \
 	  tools/build-docker.sh
@@ -203,16 +213,15 @@ guard-container:
 clean-container:
 	@docker rm -v pigen_work 2>/dev/null && echo "Container pigen_work entfernt." || echo "Kein Container pigen_work vorhanden."
 
-# Partialles Bootstrap-RootFS (z. B. nach abgebrochenem Lauf) entfernen —
-# sonst überspringt stage0/prerun.sh den Bootstrap und der Build scheitert
-# später im unvollständigen rootfs (README-Troubleshooting). Die Dateien
-# gehören root (Build läuft im Container als root): erst normal rm, dann
-# per Container (pi-gen-Image, Repo-Root gemountet — work ist dort kein
-# Mountpoint), zuletzt sudo als Fallback.
+# Partialles Bootstrap-RootFS entfernen (root-owned — der Build läuft im
+# Container als root). Fallback-Kette:
+#   1. rm -rf: schnell, wenn work/ user-owned (typisch: lokal, VM nach rsync)
+#   2. docker run: Fallback, wenn das pi-gen-Image verfügbar ist
+#   3. sudo rm: letzter Ausweg (z. B. Docker tot nach Fehler/Crash)
 clean-work:
 	@rm -rf $(WORK_DIR) 2>/dev/null || \
 	  docker run --rm --volume $(REPO_ROOT):/repo pi-gen rm -rf /repo/work 2>/dev/null || \
-	  sudo rm -rf $(WORK_DIR)
+	  { echo "work/ ist root-owned — räumen mit sudo…" >&2; sudo rm -rf $(WORK_DIR); }
 	@echo "work/ entfernt (Bootstrap baut frisch)."
 
 # qemu-Emulation-Entry (Container-qemu, F-Flag) — für den Docker-Build
@@ -253,7 +262,8 @@ vm-bootstrap: guard-vagrant
 	  done; \
 	  if ! docker ps >/dev/null 2>&1; then \
 	    echo "vm-bootstrap: Docker fehlt/unerreichbar — installiere …"; \
-	    curl -fsSL https://get.docker.com | sudo sh; \
+	    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh && sudo sh /tmp/get-docker.sh; \
+	    rm -f /tmp/get-docker.sh; \
 	    sudo usermod -aG docker $$USER; \
 	    echo "vm-bootstrap: SSH-Session neu öffnen (docker-Gruppe greift erst dann)."; \
 	  else \
@@ -262,11 +272,11 @@ vm-bootstrap: guard-vagrant
 
 vm-sync: guard-vagrant
 	@sshcfg=$$(mktemp); \
+	  trap 'rm -f "$$sshcfg"' EXIT; \
 	  cd $(VAGRANT_DIR) && vagrant ssh-config > $$sshcfg; \
 	  key=$$(awk '/[[:space:]]*IdentityFile/{print $$2}' $$sshcfg | tail -1); \
 	  port=$$(awk '/[[:space:]]*Port[ \t]/{print $$2}' $$sshcfg | tail -1); \
 	  host=$$(awk '/[[:space:]]*HostName/{print $$2}' $$sshcfg | tail -1); \
-	  rm -f $$sshcfg; \
 	  vagrant ssh -c 'mkdir -p $(VM_DEST)' >/dev/null; \
 	  rsync -a --delete \
 	    --exclude work/ --exclude deploy/ --exclude .venv/ \

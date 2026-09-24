@@ -323,7 +323,19 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 
 - [ ] Reproduzierbare Builds: apt-Snapshots (snapshot.debian.org),
       docker-ce-Version pinnen, Image-Benennung mit Datum +
-      pi-gen-Commit-Kürzel
+      pi-gen-Commit-Kürzel — **Messdaten aus dem Build-Log (2026-09-24,
+      6 Builds appended):**
+      - **Image-Größen-Drift 40 MB zwischen Same-Day-Builds** (806 →
+        766 MB, gleicher Code-Stand) — ungepinnte apt-Pakete wandern;
+        der Punkt ist damit nicht theoretisch, sondern gemessen
+      - **apt-Varianz dominiert die Laufzeit:** docker-ce-Installation
+        5 s (apt-Cache-Hit) vs. 8:14 min (Download); 07/venv+pip 40 s
+        vs. 3:37 min — Netzwerk vs. Cache
+      - **05-finalise (xz-Kompression) 10–22 min** — pi-gen nutzt bereits
+        `xz --threads 0 --memlimit-compress=50%` (74d08a3, verifiziert)
+        → Threading-Hebel existiert nicht; verbleibender Hebel:
+        `COMPRESSION_LEVEL` senken (Default 6; Level 3 ≈ 2–3× schneller,
+        ~10–15 % größeres Image — Trade-off offen)
 
 - [ ] Build-Host: qemu-Emulation des alten Hosts bricht den Bootstrap —
       Host = Ubuntu 20.04.6 (EOL), qemu-user-static **4.2.1**; dessen
