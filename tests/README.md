@@ -180,7 +180,7 @@ echter Kernel, echte Peripherie.
 |---|---|---|
 | `PIGEN_TEST_IMAGE` | auto (neuestes in `deploy/` bzw. `pi-gen/deploy/`) | explizites Image |
 | `PIGEN_TEST_CACHE` | `tests/.work` | Cache-Verzeichnis |
-| `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen (`--clean-cache` setzt intern diese Variable) |
+| `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen (`--clean-cache` setzt intern diese Variable). Nicht parallel-sicher (pytest-xdist): wirkt prozessübergreifend |
 | `PIGEN_TEST_BOOT_TIMEOUT` | `900` | Q1a: Sekunden bis systemd-Zustand |
 | `PIGEN_TEST_DOCKER_TIMEOUT` | `300` | Timeout je Container-Kommando |
 | `PIGEN_TEST_NO_BINFMT` | – | `1` = Container-qemu-Entry nicht selbst setzen/räumen (wenn der Host binfmt anderweitig managed) |
