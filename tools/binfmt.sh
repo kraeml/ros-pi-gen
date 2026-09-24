@@ -31,13 +31,13 @@
 # fail-safe: registrieren.
 #
 # Bekannte Einschränkungen (bewusst dokumentiert statt verschwiegen):
-# - MIN_MAJOR=8 ist konservativ über der echten OFD-Schwelle: **qemu 5.1.0**
-#   (Launchpad Bug 1893010, Fix-Commit 2d92c6827ca0 „linux-user: implement
-#   OFD locks", Aug 2020). Gemessen: 4.2.1 = defekt (EINVAL), 6.2.0
-#   (Jammy) = ok (A/B-Probe 2026-09-24: systemd-sysusers läuft unter 6.2
-#   ohne passwd-lock-EINVAL), 10.0.13 = ok. Die 8er-Schwelle schützt
-#   zusätzlich die Container-TESTS gegen die dokumentierten qemu-6.2-
-#   Spawn-Grenzen (clone3/cgroup, tests/README „Warum kein QEMU").
+# - MIN_MAJOR=6: empirische Schwelle aus der Q1a-Versionsmatrix
+#   (tools/q1a-probe.sh, 2026-09-24 — je Probe Q1a-Container-Boot):
+#   4.2.1 = WEDGE (exec-haengend), 6.2.0 (Jammy) = PASS (1:03),
+#   8.2.2 (Noble) = PASS, 10.0.13 = PASS. Theoretische OFD-Fix-Schwelle:
+#   qemu 5.1.0 (Launchpad Bug 1893010, Fix-Commit 2d92c6827ca0 „linux-user:
+#   implement OFD locks", Aug 2020) — 5.x ist UNGEMESSEN, daher Schwelle 6
+#   (älteste gemessen-grüne Version = exakt Jammys Fall).
 # - F-Flag/Inode-Randfall: der Kernel hält den Interpreter als Inode-Referenz
 #   offen; der Pfad im Entry zeigt nach einem `apt upgrade qemu-user-static`
 #   ggf. auf eine NEUE Version, während der Kernel noch die ALTE Inode nutzt.
@@ -52,7 +52,7 @@
 set -euo pipefail
 
 ENTRY=qemu-aarch64-rpi
-MIN_MAJOR=8
+MIN_MAJOR=6
 # Korrektes 20-Byte-Magic/-Mask (aarch64-ELF, e_type=EXEC, e_machine=EM_AARCH64);
 # pi-gens eigener Fallback-String in build-docker.sh ist defekt (24-Byte-Magic
 # gegen 20-Byte-Mask -> EINVAL, und bash-echo interpretiert \x ohnehin nicht).

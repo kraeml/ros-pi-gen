@@ -155,12 +155,18 @@ den pi-gen-Container — kein Host-root nötig), Q1a mit `PIGEN_TEST_NO_BINFMT=1
 + `PIGEN_TEST_BOOT_TIMEOUT=300` (Wedges bounden), Klassifikation
 PASS/WEDGE/FAIL(-OFD), Entry-Cleanup.
 
-| Version | Quelle | Erwartung | Ergebnis |
+| Version | Quelle | Erwartung | Ergebnis (gemessen 2026-09-24) |
 |---|---|---|---|
-| 4.2.1 | Ubuntu 20.04 (Host) | Negativkontrolle: Wedge (OFD, passwd-lock) | *Probe ausstehend* |
-| 6.2.0 | Ubuntu 22.04 (jammy) | OFD ok (≥ 5.1), Spawn-Grenze? („Warum kein QEMU“ Nr. 6) | *Probe ausstehend* |
-| 8.2.2 | Ubuntu 24.04 (noble) | ok (VM-Build-Beleg) | *Probe ausstehend* |
-| 10.0.13 | Debian trixie (pi-gen-Container) | Positivkontrolle: grün (67-passed-Lauf) | *Probe ausstehend* |
+| 4.2.1 | Ubuntu 20.04 (Host) | Negativkontrolle: Wedge (OFD, passwd-lock) | ❌ **WEDGE** — `exec-haengend`, kein Boot in 300 s (7:40 min Lauf) |
+| 6.2.0 | Ubuntu 22.04 (jammy) | OFD ok (≥ 5.1), Spawn-Grenze? („Warum kein QEMU“ Nr. 6) | ✅ **PASS** (1:03 min) — Spawn-Grenze greift beim Boot nicht |
+| 8.2.2 | Ubuntu 24.04 (noble) | ok (VM-Build-Beleg) | ✅ **PASS** (1:10 min) |
+| 10.0.13 | Debian trixie (pi-gen-Container) | Positivkontrolle: grün (67-passed-Lauf) | ✅ **PASS** (0:47 min) |
+
+**Empirische Schwelle: qemu 6.2 = älteste grüne Version** → `MIN_MAJOR=6`
+im Version-Gate (vorher konservativ 8). Jammy-Hosts (Build **und** Tests)
+laufen damit mit Host-qemu 6.2 ohne binfmt-Entry; nur focal (4.x) bekommt
+den Container-Entry. 5.x bleibt ungetestet (fail-safe: Gate registriert
+die Container-Entry für alle < 6).
 
 Ergebnis → MIN_MAJOR auf die älteste empirisch grüne Version setzen (oder
 8 bestätigt); Wedge-Signaturen je Version dokumentieren.
