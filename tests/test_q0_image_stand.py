@@ -17,6 +17,9 @@ def test_q0a_image_vorhanden(image_path):
 
 
 def test_q0b_pigen_commit_gepinnt(pack):
+    # startswith statt Gleichheit: akzeptiert Kurz- (7-stellig) wie Vollhash
+    # des gepinnten Commits; Kollisionsrisiko im Kurzformat ist bei einem
+    # stabilen Upstream-Commit praktisch ausgeschlossen.
     info = pack.source.parent / (
         pack.source.name.removeprefix("image_").rsplit(".img", 1)[0] + ".info"
     )
@@ -60,6 +63,10 @@ def test_q0d_bau_log_vollstaendig(pack: ImagePack, build_log_path, build_log_tex
     image_core = pack.source.name.removeprefix("image_").split(".img")[0]
     # pi-gen haengt je nach Konfiguration Suffixe wie '-lite' an; der Workdir-Name
     # muss im Imagenamen enthalten sein (datei: <datum>-<workdir>[<suffix>]).
+    # Bewusst Teilstring-Match statt exaktem Abgleich: der Workdir ist der
+    # IMG_NAME-spezifische Praefix, ein False-Positive (fremdes Log, dessen
+    # Workdir zufaellig als Substring passt) ist bei diesem Namensschema
+    # praktisch ausgeschlossen.
     assert m.group(1) in image_core, (
         f"Workdir '{m.group(1)}' passt nicht zum Imagenamen '{image_core}' "
         "- Log evtl. von anderem Build."
@@ -91,6 +98,11 @@ def test_q0e_bau_log_begin_end_paare(build_log_text):
                         stack.pop()
                     if stack:
                         stack.pop()
+                # Best-Effort-Diagnose: ab dem ersten echten Strukturbruch ist
+                # der Stack nicht mehr vertrauenswürdig — nachfolgende, eigentlich
+                # korrekte Paare können dann fälschlich markiert werden. problems
+                # ist dann ein Hinweis auf DASS etwas kaputt ist, keine präzise
+                # Paar-Diagnose mehr; das Log wird ohnehin verworfen.
             else:
                 stack.pop()
         elif kind == "Skip":
@@ -132,6 +144,11 @@ VARIANT_SUBSTAGE_PATTERN = re.compile(
 
 
 def test_q0f_bau_log_pflichtstufen(build_log_text):
+    # Bewusst Mengen-Check, kein Stack: prueft nur die VOLLSTÄNDIGKEIT
+    # (jede Pflichtstufe min. einmal begonnen und beendet), nicht Reihenfolge
+    # oder Verschachtelung — dafür ist test_q0e (Begin/End-Stack) zuständig.
+    # Doppelte Begin ohne dazwischenliegendes End fallen hier ebenfalls nicht
+    # auf (würde q0e als End-Reihenfolge-Problem zeigen).
     begins = {token for kind, token in _log_events(build_log_text) if kind == "Begin"}
     ends = {token for kind, token in _log_events(build_log_text) if kind == "End"}
     fehlt_begin = [t for t in REQUIRED_SUBSTAGES if t not in begins]
