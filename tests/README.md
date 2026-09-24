@@ -38,9 +38,11 @@ idempotent darin und ruft pytest auf. Alternativ direkt:
 | `7z`, `debugfs` (e2fsprogs) | Boot-Partition entpacken, ext4 lesen (ohne Root) |
 | nftables-Hilfscontainer | Q6 (wird einmalig gebaut, dann gecached) |
 
-**Platzbedarf:** Cache unter `tests/.work/` (~10 GB: entpacktes Image,
-Partitions-Slices, RootFS-Staging). `PIGEN_TEST_CACHE` überschreibbar;
-`PIGEN_TEST_CLEAN=1` löscht vor dem Lauf. Kein sudo nötig.
+**Platzbedarf:** Cache unter `tests/.work/` (8–12 GB je nach Image-/
+Variantenumfang: entpacktes Image, Partitions-Slices, RootFS-Staging).
+`PIGEN_TEST_CACHE` überschreibbar; `PIGEN_TEST_CLEAN=1` löscht vor dem
+Lauf — `--clean-cache` (Schnellstart) setzt intern dieselbe Variable.
+Kein sudo nötig.
 
 **Image-Auswahl:** automatisch die neueste `image_*.img[.xz]` in
 `ros-pi-gen/deploy/` (Docker-Build via `make build`) bzw.
@@ -64,7 +66,7 @@ Partitions-Slices, RootFS-Staging). `PIGEN_TEST_CACHE` überschreibbar;
 | `test_q8` | Q8 | `visudo -cf /etc/sudoers.d/acpu` + Beleg im Build-Log | Container + Build-Log |
 | `test_q9` | Q9 | `NetworkManager-dispatcher` vorhanden/aktivierbar | Container |
 | `test_overlay_*` | – | Overlay-Dateien: Exec-Bits, `00-packages` je Stage, AccessPopup-Dateisatz | Repo-Dateien |
-| `test_hostname_ssid[*]` | §8.6 | `hostname-ssid.sh`-Logik: `<hostname>-AP`, Umlaute, Kürzung, Fallback, idempotent | Docker (stub-hostname) |
+| `test_hostname_ssid[*]` | §8.6 | `hostname-ssid.sh`-Logik: `<hostname>-AP`, Umlaute, Kürzung, Fallback, idempotent; **Hostnamenwechsel** (Dispatcher-Fall: SSID folgt neuem Hostnamen statt bestehendem `ap_ssid`) | Docker (stub-hostname) |
 | `test_extras_*` | TODO Block 3 | docker-ce/ansible installiert, docker.service enabled, cloud-init ok | Container |
 
 ## Hardware-Läufe (Gruppe Q final am Pi)
@@ -118,6 +120,10 @@ echter Kernel, echte Peripherie.
 
 - **Q1a** prüft kein echtes Kernel-Booting — der Kernel-Beleg kommt vom
   Hardware-Lauf (`pi-smoke.sh`, Q1).
+- **pi-gen-Pin (`74d08a3`, Q0b):** bewusste Stabilitätsentscheidung —
+  Updates nur per Pin-Änderung im ros-pi-gen-Repo, nie automatisch
+  (Rationale: README, Abschnitt Struktur / TODO Block 1, Pin-Update-
+  Politik).
 - **Q6** (Container) validiert Syntax/Features gegen den Host-Kernel; der
   verbindliche Lauf ist Q6 am Pi (bcm-Kernel) bzw. der Hardware-Test D5.
 - **Q2–Q9** werden im Container am echten RootFS geprüft (echte `systemctl`/
@@ -137,7 +143,7 @@ echter Kernel, echte Peripherie.
 |---|---|---|
 | `PIGEN_TEST_IMAGE` | auto (neuestes in `deploy/` bzw. `pi-gen/deploy/`) | explizites Image |
 | `PIGEN_TEST_CACHE` | `tests/.work` | Cache-Verzeichnis |
-| `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen |
+| `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen (`--clean-cache` setzt intern diese Variable) |
 | `PIGEN_TEST_BOOT_TIMEOUT` | `900` | Q1a: Sekunden bis systemd-Zustand |
 | `PIGEN_TEST_DOCKER_TIMEOUT` | `300` | Timeout je Container-Kommando |
 | `PIGEN_TEST_NO_BINFMT` | – | `1` = Container-qemu-Entry nicht selbst setzen/räumen (wenn der Host binfmt anderweitig managed) |
