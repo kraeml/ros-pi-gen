@@ -69,6 +69,33 @@ Kein sudo nötig.
 | `test_hostname_ssid[*]` | §8.6 | `hostname-ssid.sh`-Logik: `<hostname>-AP`, Umlaute, Kürzung, Fallback, idempotent; **Hostnamenwechsel** (Dispatcher-Fall: SSID folgt neuem Hostnamen statt bestehendem `ap_ssid`) | Docker (stub-hostname) |
 | `test_extras_*` | TODO Block 3 | docker-ce/ansible installiert, docker.service enabled, cloud-init ok | Container |
 
+## Architektur (Build-Host-Ebene)
+
+Session-scoped Fixture-Kette (tests/conftest.py) — die Suite **baut kein
+Image**, sie setzt `make build` voraus:
+
+1. `discover_image` — neuestes `image_*.img[.xz]` aus `deploy/` bzw.
+   `pi-gen/deploy/` (überschreibbar `PIGEN_TEST_IMAGE`); ohne Fund → Skip.
+2. `prepare` — Image entpacken, Partition-Slices in den Cache
+   (`tests/.work`); daraus liest `debugfs` root_img/boot.
+3. `find_build_log` — komplette `build-docker.log`/`build.log` neben der
+   Image-Quelle (pro Build einmaliges Artefakt, keine Rotation).
+4. `stage_rootfs` → `docker import` — RootFS-Staging-Kopie einmal pro
+   Session als arm64-Image importieren (Owner via `--owner=0` normalisiert,
+   Tag aus Pfad-Digest).
+5. `crun` — pro Aufruf ein frischer `docker run --rm --platform linux/arm64`
+   gegen dieses importierte Image (kein Zustand zwischen Befehlen).
+
+Container-Modell: **Q1a** startet einen laufenden systemd-Container
+(`docker run -d --privileged`, am Testende aufgeräumt); **Q2–Q9** spawnen
+Wegwerf-Container je Befehl vom selben RootFS (`is-enabled`/`visudo` lesen
+Unit-Dateien — kein gebootetes System nötig); **Q6** nutzt ein separates
+amd64-Hilfsimage mit `--network host`.
+
+Q2–Q9 hängen **nicht** von Q1 ab (kein Test-Ordering/Dependency):
+`BOOT_TIMEOUT` wirkt nur auf die Q1a-Poll-Schleife; bei Q1-Fail laufen
+Q2–Q9 eigenständig weiter.
+
 ## Hardware-Läufe (Gruppe Q final am Pi)
 
 `tests/tools/pi-smoke.sh` läuft **auf dem Pi** (read-only) und prüft Q1–Q9
@@ -126,10 +153,17 @@ echter Kernel, echte Peripherie.
   Politik).
 - **Q6** (Container) validiert Syntax/Features gegen den Host-Kernel; der
   verbindliche Lauf ist Q6 am Pi (bcm-Kernel) bzw. der Hardware-Test D5.
+  Voraussetzung: `NETLINK_NETFILTER` mit geladenen `nf_tables`/`nfnetlink`-
+  Modulen im Host-Kernel (moderne Kernel-Versionen bringen das mit; das
+  Docker-Bridge-Netns bietet den Netlink nicht — daher `--network host`).
+  Bei „Protocol not supported" skippt der Test statt zu failen.
 - **Q2–Q9** werden im Container am echten RootFS geprüft (echte `systemctl`/
   `visudo`-Binaries), Ownership via `tar --owner=0` beim Import normalisiert.
 - Q0 erwartet, dass der neueste Build-Log zum neuesten Image gehört
   (`build-docker.log`/`build.log` im selben Verzeichnis).
+- **Q8** liest den Build-Log komplett ein (`build_log_text`); die Log-Datei
+  ist ein pro Build einmaliges Artefakt neben dem Image (keine Rotation) —
+  Kürzung/Verlust würde auch Q0a–d treffen, Risiko damit theoretisch.
 - **Q1a-Fail-Output:** Container-Log-Tail (2000 Zeichen) geht in die
   pytest-Ausgabe; vollständige Container-Logs als CI-Artefakt speichern
   = Aufgabe des Workflows (siehe GitHub-Image-Workflow.md, Upload-Schritt).
