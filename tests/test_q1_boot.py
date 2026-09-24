@@ -40,6 +40,10 @@ def test_q1a_container_boot(container_tag):
     container.remove_container(name)
     try:
         container.start_systemd(container_tag, name)
+        # Poll: 5-s-Intervall, BOOT_TIMEOUT 900 s (conftest) → bis zu 180
+        # Zyklen; empirisch erreicht systemd unter qemu 8.x running/degraded
+        # in ~1–3 min — das Signal ist ein Grobzustand, kein Timing-Messwert,
+        # daher ist grobe Granularität ausreichend (kein per-Zyklus-Output).
         state, deadline = "", time.monotonic() + BOOT_TIMEOUT
         while time.monotonic() < deadline:
             state = _is_system_running(name)

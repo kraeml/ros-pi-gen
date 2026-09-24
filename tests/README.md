@@ -130,6 +130,9 @@ echter Kernel, echte Peripherie.
   `visudo`-Binaries), Ownership via `tar --owner=0` beim Import normalisiert.
 - Q0 erwartet, dass der neueste Build-Log zum neuesten Image gehört
   (`build-docker.log`/`build.log` im selben Verzeichnis).
+- **Q1a-Fail-Output:** Container-Log-Tail (2000 Zeichen) geht in die
+  pytest-Ausgabe; vollständige Container-Logs als CI-Artefakt speichern
+  = Aufgabe des Workflows (siehe GitHub-Image-Workflow.md, Upload-Schritt).
 - **extras/cloud-init** prüft bewusst nur „nicht failed" (Oneshot-Service,
   nach Boot typ. inactive) — als spätere Verfeinerung böte
   `cloud-init status` ein präziseres Signal (done/running/error/degraded,
@@ -153,6 +156,10 @@ echter Kernel, echte Peripherie.
 
 - **Manifest ergänzen:** `test_image_files.py` — Liste `ROOTFS_MANIFEST` /
   `BOOT_MANIFEST` (eine Zeile pro Datei oder Inhalts-Marker).
+- **Neue Dateien in `stage-custom/07-accesspopup/files/`:** zwei Stellen —
+  Liste in `test_overlay_files.py::test_overlay_accesspopup_files_komplett`
+  (Overlay-Ebene) und ggf. `ROOTFS_MANIFEST` in `test_image_files.py`
+  (Image-Ebene).
 - **Pflichtstufen ergänzen:** `REQUIRED_SUBSTAGES` in `test_q0_image_stand.py`.
 - Änderungen an `stage-custom/**` → Overlay-Guard sofort, Image-Tests nach Rebuild.
 - Neue Protokollzeilen in Gruppe Q → Testfunktion mit passender ID
