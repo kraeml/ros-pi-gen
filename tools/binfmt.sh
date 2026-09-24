@@ -19,10 +19,19 @@
 # Host-Interpreter weiter (z. B. Ubuntu-Vagrant-VM 24.04). Nur bei älterem
 # oder fehlendem Interpreter wird der Container-Entry registriert.
 #
+# Ubuntu 24.04 registriert als Interpreter einen Symlink mit abweichendem
+# Namen (/usr/libexec/qemu-binfmt/aarch64-binfmt-P -> /usr/bin/qemu-
+# aarch64-static): der Debian-Patch im Binary verweigert Direktaufrufe
+# unter -binfmt-P-Namen ("has to be run using kernel binfmt-misc
+# subsystem") — deshalb löst das Gate den Pfad via readlink -f auf und
+# fragt die Version am echten Binary. Echte Wrapper-Skripte (#!) werden
+# geparst; unauflösbar -> fail-safe: registrieren.
+#
 # Bekannte Einschränkungen (bewusst dokumentiert statt verschwiegen):
 # - MIN_MAJOR=8 ist eine Beobachtung, kein verbriefender Changelog-Beleg:
-#   gemessen 4.2.1 = defekt (EINVAL), 10.0.13 = ok. Bei Zweifeln regelt das
-#   fail-safe-Verhalten (unlesbares Format -> Fallback-Registrierung).
+#   gemessen 4.2.1 = defekt (EINVAL), 10.0.13 = ok, 8.2.2 (VM) = ok. Bei
+#   Zweifeln regelt das fail-safe-Verhalten (unlesbares Format ->
+#   Fallback-Registrierung).
 # - F-Flag/Inode-Randfall: der Kernel hält den Interpreter als Inode-Referenz
 #   offen; der Pfad im Entry zeigt nach einem `apt upgrade qemu-user-static`
 #   ggf. auf eine NEUE Version, während der Kernel noch die ALTE Inode nutzt.
@@ -58,12 +67,44 @@ active_interpreter() {
 }
 
 interpreter_major() {
-	# <interpreter> --version -> "qemu-aarch64 version 4.2.1 (…)"
+	# <binary> --version -> "qemu-aarch64 version 8.2.2 (…)"
 	# Unverständliches Format -> leerer Output -> Aufrufer fällt in den
 	# sicheren Fallback (registrieren statt überspringen).
 	local out
 	out="$("$1" --version 2>/dev/null | head -1)" || return 1
 	echo "$out" | sed -n 's/.* version \([0-9][0-9]*\)\..*/\1/p'
+}
+
+# Interpreter-Pfad auflösen: Ubuntu 24.04 registriert -binfmt-P-Symlinks,
+# deren Ziel sich nicht direkt aufrufen lässt (Debian-Patch verlangt
+# binfmt_misc-Kontext) — deshalb das echte Binary hinter dem Symlink
+# verwenden; echte Wrapper-Skripte (#!) per exec-Zeile parsen.
+resolve_interpreter() {
+	local path="$1" resolved cand
+	resolved="$(readlink -f "$path" 2>/dev/null)" || resolved=""
+	if [ -n "$resolved" ] && major="$(interpreter_major "$resolved")" && [ -n "$major" ]; then
+		echo "$resolved"
+		return 0
+	fi
+	if [ -f "$path" ] && head -c 2 "$path" | grep -q '#!'; then
+		cand="$(grep -a -m1 -o '/[A-Za-z0-9/_.-]*qemu-aarch64[A-Za-z0-9_.-]*' "$path")"
+		if [ -n "$cand" ] && [ -x "$cand" ] && major="$(interpreter_major "$cand")" && [ -n "$major" ]; then
+			echo "$cand"
+			return 0
+		fi
+	fi
+	echo ""
+}
+
+# Major-Version des effektiven Interpreters ermitteln (leer = unauflösbar).
+effective_major() {
+	local resolved
+	resolved="$(resolve_interpreter "$1")"
+	if [ -n "$resolved" ]; then
+		interpreter_major "$resolved"
+	else
+		echo ""
+	fi
 }
 
 # docker ggf. per sudo (gleiches Fallback-Muster wie build-docker.sh).
@@ -87,7 +128,7 @@ setup)
 	# Version-Gate: moderner Host-Interpreter -> nichts zu tun
 	active="$(active_interpreter)"
 	if [ -n "$active" ]; then
-		if major="$(interpreter_major "$active")" && [ -n "$major" ] && [ "$major" -ge "$MIN_MAJOR" ]; then
+		if major="$(effective_major "$active")" && [ -n "$major" ] && [ "$major" -ge "$MIN_MAJOR" ]; then
 			echo "binfmt: aktiver Host-Interpreter $active (qemu $major.x) ist OFD-tauglich — kein Entry nötig."
 			exit 0
 		fi

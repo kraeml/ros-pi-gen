@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
-# Docker-Build-Orchestrierung: qemu-Entry setzen -> bauen -> Entry immer
-# aufräumen. Der trap (EXIT|INT|TERM) schließt Ctrl+C/SIGINT ein — nur
-# SIGKILL bleibt unbeherrscht (Selbstheilung: der nächste binfmt-setup
-# deregistert Alt-Einträge zuerst; manuell: tools/binfmt.sh cleanup).
+# Docker-Build-Orchestrierung: pi-gen-Image sicherstellen -> qemu-Entry
+# setzen -> bauen -> Entry immer aufräumen. Der trap (EXIT|INT|TERM)
+# schließt Ctrl+C/SIGINT ein — nur SIGKILL bleibt unbeherrscht
+# (Selbstheilung: der nächste binfmt-setup deregistert Alt-Einträge
+# zuerst; manuell: tools/binfmt.sh cleanup).
+#
+# Image vor Entry: die binfmt-Registrierung läuft im pi-gen-Container —
+# auf einem frischen Host (kein Image, z. B. nach docker system prune)
+# würde setup sonst scheitern und der Build ohne Entry starten (stummer
+# OFD-Bug auf alten Hosts). Identische Build-Argumente wie in pi-gens
+# build-docker.sh → dessen eigener Build ist danach Cache-Hit.
 #
 # binfmt_misc ist kernel-global: während des Laufs gilt der Container-
 # Entry für den gesamten Host (F-Flag hält den Interpreter-FD offen, auch
@@ -14,6 +21,10 @@ set -u
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BINFMT="$REPO_ROOT/tools/binfmt.sh"
+
+# pi-gen-Image sicherstellen (identische Argumente wie pi-gen build-docker.sh)
+docker image inspect pi-gen >/dev/null 2>&1 || \
+	docker build --build-arg BASE_IMAGE=docker.io/debian:trixie -t pi-gen "$REPO_ROOT/pi-gen"
 
 "$BINFMT" setup
 # || true: der Exit-Status des Skripts wäre sonst der des letzten Trap-
