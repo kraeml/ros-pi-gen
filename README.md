@@ -452,6 +452,15 @@ unwirksam (24-Byte-Magic gegen 20-Byte-Mask → EINVAL) — daher der eigene
 Registrierungsweg; Details: [TODO.md](TODO.md), Block 3 (Build-Umgebung,
 zwei Gleise — u. a. Ubuntu-Vagrant-VM 24.04 als künftige Build-Umgebung).
 
+**Randfall nach `apt upgrade qemu-user-static`:** der Kernel hält bei
+F-Flag-Entrys den Interpreter als **Inode-Referenz** offen — nach einem
+Upgrade am selben Pfad läuft der Build trotzdem mit der **alten** Version
+weiter, während `--version` am Pfad die neue zeigt. Symptom: passwd-lock-
+Fehler trotz moderner Version am Pfad. Abhilfe: Entry löschen/neu
+registrieren (`make binfmt-cleanup && make binfmt-setup` bzw. der
+sudo-Einzeiler aus der binfmt-Meldung) oder rebooten — das Version-Gate
+liest den Pfad und kann die Inode-Diskrepanz nicht erkennen.
+
 ### `arm64: not supported on this machine/kernel` (nativ)
 
 Cross-Build von x86_64 braucht `binfmt_misc` + qemu: `modprobe binfmt_misc`

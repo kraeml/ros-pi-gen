@@ -19,6 +19,20 @@
 # Host-Interpreter weiter (z. B. Ubuntu-Vagrant-VM 24.04). Nur bei älterem
 # oder fehlendem Interpreter wird der Container-Entry registriert.
 #
+# Bekannte Einschränkungen (bewusst dokumentiert statt verschwiegen):
+# - MIN_MAJOR=8 ist eine Beobachtung, kein verbriefender Changelog-Beleg:
+#   gemessen 4.2.1 = defekt (EINVAL), 10.0.13 = ok. Bei Zweifeln regelt das
+#   fail-safe-Verhalten (unlesbares Format -> Fallback-Registrierung).
+# - F-Flag/Inode-Randfall: der Kernel hält den Interpreter als Inode-Referenz
+#   offen; der Pfad im Entry zeigt nach einem `apt upgrade qemu-user-static`
+#   ggf. auf eine NEUE Version, während der Kernel noch die ALTE Inode nutzt.
+#   Das Version-Gate liest den Pfad — im Zweifel Entry löschen/neu
+#   registrieren (make binfmt-cleanup && make binfmt-setup) oder rebooten;
+#   Symptom sonst: passwd-lock-Fehler trotz moderner Version am Pfad.
+# - interpreter_major($active) mit totem Pfad/nonstandard-Format: getestet
+#   (2026-09-23, bash 5.0.17) — if-Kontext schluckt rc != 0 trotz set -e,
+#   leeres Ergebnis führt in den (sicheren) Fallback-Registrierungspfad.
+#
 # usage: binfmt.sh setup|cleanup
 set -euo pipefail
 
@@ -45,20 +59,27 @@ active_interpreter() {
 
 interpreter_major() {
 	# <interpreter> --version -> "qemu-aarch64 version 4.2.1 (…)"
+	# Unverständliches Format -> leerer Output -> Aufrufer fällt in den
+	# sicheren Fallback (registrieren statt überspringen).
 	local out
 	out="$("$1" --version 2>/dev/null | head -1)" || return 1
 	echo "$out" | sed -n 's/.* version \([0-9][0-9]*\)\..*/\1/p'
 }
 
-# docker ggf. per sudo (gleiches Fallback-Muster wie build-docker.sh)
-DOCKER=docker
-if ! docker ps >/dev/null 2>&1; then
-	DOCKER="sudo docker"
-	if ! $DOCKER ps >/dev/null 2>&1; then
-		echo "binfmt.sh: docker nicht erreichbar (auch nicht per sudo)" >&2
-		exit 1
+# docker ggf. per sudo (gleiches Fallback-Muster wie build-docker.sh).
+# Aufgabenbezogen aufrufen: cleanup muss auch ohne docker in die
+# Handlungsanweisung laufen können (der frühere Top-Guard hätte den
+# Fallback-Zweig nie erreicht).
+require_docker() {
+	DOCKER=docker
+	if ! docker ps >/dev/null 2>&1; then
+		DOCKER="sudo docker"
+		if ! $DOCKER ps >/dev/null 2>&1; then
+			echo "binfmt.sh: docker nicht erreichbar (auch nicht per sudo)" >&2
+			return 1
+		fi
 	fi
-fi
+}
 
 cmd="${1:-}"
 case "$cmd" in
@@ -74,6 +95,7 @@ setup)
 	else
 		echo "binfmt: kein aarch64-Host-Entry registriert — registriere Container-Entry."
 	fi
+	require_docker || exit 1
 	$DOCKER run --rm --privileged pi-gen bash -c "
 		set -e
 		mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
@@ -84,14 +106,28 @@ setup)
 	"
 	;;
 cleanup)
-	if [ -e "/proc/sys/fs/binfmt_misc/$ENTRY" ]; then
-		$DOCKER run --rm --privileged pi-gen bash -c "
+	if [ ! -e "/proc/sys/fs/binfmt_misc/$ENTRY" ]; then
+		echo "binfmt: kein Entry $ENTRY vorhanden"
+		exit 0
+	fi
+	docker_ok=1
+	if ! require_docker; then
+		docker_ok=0
+	elif ! $DOCKER run --rm --privileged pi-gen bash -c "
 			mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
 			echo -1 > /proc/sys/fs/binfmt_misc/$ENTRY
 			echo \"binfmt: $ENTRY entfernt\"
-		"
-	else
-		echo "binfmt: kein Entry $ENTRY vorhanden"
+		"; then
+		docker_ok=0
+	fi
+	if [ "$docker_ok" -ne 1 ]; then
+		# Bewusst non-interaktiv: keine sudo-Passwortabfrage im Trap-Kontext —
+		# stattdessen klare Handlungsanweisung (rc 1; der Wrapper-Trap
+		# entschärft via || true, der Build-Exit-Code bleibt erhalten).
+		echo "binfmt: $ENTRY konnte nicht per Docker entfernt werden — manuell:" >&2
+		echo "  sudo bash -c 'echo -1 > /proc/sys/fs/binfmt_misc/$ENTRY'" >&2
+		echo "  (oder rebooten — binfmt_misc-Einträge überleben keinen Neustart)" >&2
+		exit 1
 	fi
 	;;
 *)

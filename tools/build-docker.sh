@@ -16,7 +16,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BINFMT="$REPO_ROOT/tools/binfmt.sh"
 
 "$BINFMT" setup
-trap '"$BINFMT" cleanup' EXIT INT TERM
+# || true: der Exit-Status des Skripts wäre sonst der des letzten Trap-
+# Befehls — ein fehlgeschlagenes Cleanup würde den Build-Exit-Code
+# maskieren (cleanup meldet seinen Fehlschlag selbst auf stderr).
+trap '"$BINFMT" cleanup || true' EXIT INT TERM
 
 rc=0
 cd "$REPO_ROOT" || exit 1
