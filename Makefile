@@ -91,13 +91,16 @@ help:
 	@echo
 	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP)"
 
-# --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren)
-$(VENV)/bin/python: tests/requirements.txt
+# --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren).
+# Stamp-Datei statt bin/python als Target: touch folgt dem venv-Symlink zum
+# Base-Interpreter — bei System-Python (root-owned, VM/CI) gibt das EPERM;
+# host-seitig klappte es nur, weil dort der pyenv-Python user-owned ist.
+$(VENV)/.deps.stamp: tests/requirements.txt
 	python3 -m venv $(VENV)
 	$(VENV)/bin/pip install -q -r tests/requirements.txt
 	touch $@
 
-venv: $(VENV)/bin/python
+venv: $(VENV)/.deps.stamp
 
 # --- lint -------------------------------------------------------------------
 lint: venv guard-pigen
