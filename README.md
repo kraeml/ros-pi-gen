@@ -237,10 +237,13 @@ make vm-artifacts                 # Image + Logs holen → deploy/vm/
 # oder alles: make vm-ci
 ```
 
-- **SSH:** `make vm-ssh` (passwortlos, `vagrant ssh`); code-server unter
-  `http://192.168.33.10:8080` (Passwort `change_me`), JupyterLab unter
-  `:8888`. Das Repo liegt in der VM unter `~/build/ros-pi-gen` — bewusst
-  **nicht** im geteilten Ordner (vboxsf ist für Builds zu langsam).
+- **SSH:** `make vm-ssh` (passwortlos, `vagrant ssh`); code-server (Passwort
+  `change_me`) und JupyterLab unter der Host-Only-IP der VM: Default
+  `192.168.33.10`, hier `VM_IP=192.168.33.11` (die Default-IP ist durch
+  die laufende pi-gen-Dev-VM belegt — Vagrantfile liest die ENV
+  `VM_IP`, Submodul-Bump). Das Repo liegt in der VM unter
+  `~/build/ros-pi-gen` — bewusst **nicht** im geteilten Ordner
+  (vboxsf ist für Builds zu langsam).
 - **VM-Name:** `VM_NAME=ros-pi-gen` (Default im Makefile) — die Box-VM
   fürs Unterrichtsmaterial heißt `robotics`; Parallelbetrieb kollidiert
   nicht mehr (Vagrantfile liest `VM_NAME` aus der Umgebung).

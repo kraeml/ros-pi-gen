@@ -39,7 +39,7 @@ ENGINE   ?= docker
 VAGRANT_DIR := $(REPO_ROOT)/vm/robotics-lab-vm
 VM_DISK     ?= 80GB           # einmalig beim ersten vm-up; später ändern = vm-destroy
 VM_USER     ?= vagrant
-VM_ADDR     ?= 192.168.33.10  # private_network aus dem Vagrantfile der Box
+VM_IP      ?= 192.168.33.11  # Host-Only-IP der VM (Submodul-ENV VM_IP, Default .10) — .10 durch die laufende pi-gen-Dev-VM belegt
 VM_SSH_OPTS := -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 VM_DEST     := build/ros-pi-gen
 VM_NAME     ?= ros-pi-gen     # VirtualBox-Name; Default im Submodul-Vagrantfile: robotics
@@ -89,7 +89,7 @@ help:
 	@echo "  make vm-artifacts             deploy/ aus der VM holen (nach deploy/vm/)"
 	@echo "  make vm-halt|vm-destroy       VM anhalten / löschen · make vm-ci = ganze Kette"
 	@echo
-	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME)"
+	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren)
 $(VENV)/bin/python: tests/requirements.txt
@@ -232,7 +232,7 @@ guard-vagrant:
 	@command -v rsync >/dev/null || { echo "rsync nicht installiert" >&2; exit 1; }
 
 vm-up: guard-vagrant
-	cd $(VAGRANT_DIR) && DISK_SIZE=$(VM_DISK) VM_NAME=$(VM_NAME) vagrant up
+	cd $(VAGRANT_DIR) && DISK_SIZE=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) vagrant up
 
 vm-ssh: guard-vagrant
 	cd $(VAGRANT_DIR) && vagrant ssh
