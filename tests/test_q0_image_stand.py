@@ -51,14 +51,26 @@ def test_q0c_bau_log_enthaelt_accesspopup_stage(build_log_text):
 
 
 def test_q0d_bau_log_vollstaendig(pack: ImagePack, build_log_path, build_log_text):
-    assert "Begin /pi-gen" in build_log_text and "Build finished" in build_log_text, (
+    # pi-gen hängt an work/<IMG_NAME>/build.log AN — das Log kann mehrere
+    # Läufe enthalten. Dieser Test analysiert bewusst nur das LETZTE Segment
+    # (ab dem letzten Top-Level "Begin /pi-gen", Zeilenende-Anker — format-
+    # unabhängig, build-docker.log trägt Docker-Timestamps vor der Zeile):
+    # Workdir-Match und Export-Check beziehen sich dann auf genau den Build,
+    # der auch das aktuelle Image erzeugt hat.
+    anker = None
+    for anker in re.finditer(r"Begin /pi-gen$", build_log_text, re.MULTILINE):
+        pass
+    assert anker, "Kein Top-Level 'Begin /pi-gen' im Build-Log."
+    segment = build_log_text[anker.start():]
+
+    assert "Begin /pi-gen" in segment and "Build finished" in segment, (
         f"Build-Log {build_log_path.name} ist unvollstaendig (kein 'Build finished') "
         "- Log evtl. von abgebrochenem Build."
     )
-    assert "/pi-gen/export-image" in build_log_text, (
+    assert "/pi-gen/export-image" in segment, (
         "Build-Log enthaelt keinen export-image-Lauf (kein Image erzeugt?)."
     )
-    m = re.search(r"/pi-gen/work/([a-zA-Z0-9_-]+)/", build_log_text)
+    m = re.search(r"/pi-gen/work/([a-zA-Z0-9_-]+)/", segment)
     assert m, "Workdir-Name im Build-Log nicht auffindbar."
     image_core = pack.source.name.removeprefix("image_").split(".img")[0]
     # pi-gen haengt je nach Konfiguration Suffixe wie '-lite' an; der Workdir-Name
