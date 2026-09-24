@@ -31,10 +31,13 @@
 # fail-safe: registrieren.
 #
 # Bekannte Einschränkungen (bewusst dokumentiert statt verschwiegen):
-# - MIN_MAJOR=8 ist eine Beobachtung, kein verbriefender Changelog-Beleg:
-#   gemessen 4.2.1 = defekt (EINVAL), 10.0.13 = ok, 8.2.2 (VM) = ok. Bei
-#   Zweifeln regelt das fail-safe-Verhalten (unlesbares Format ->
-#   Fallback-Registrierung).
+# - MIN_MAJOR=8 ist konservativ über der echten OFD-Schwelle: **qemu 5.1.0**
+#   (Launchpad Bug 1893010, Fix-Commit 2d92c6827ca0 „linux-user: implement
+#   OFD locks", Aug 2020). Gemessen: 4.2.1 = defekt (EINVAL), 6.2.0
+#   (Jammy) = ok (A/B-Probe 2026-09-24: systemd-sysusers läuft unter 6.2
+#   ohne passwd-lock-EINVAL), 10.0.13 = ok. Die 8er-Schwelle schützt
+#   zusätzlich die Container-TESTS gegen die dokumentierten qemu-6.2-
+#   Spawn-Grenzen (clone3/cgroup, tests/README „Warum kein QEMU").
 # - F-Flag/Inode-Randfall: der Kernel hält den Interpreter als Inode-Referenz
 #   offen; der Pfad im Entry zeigt nach einem `apt upgrade qemu-user-static`
 #   ggf. auf eine NEUE Version, während der Kernel noch die ALTE Inode nutzt.

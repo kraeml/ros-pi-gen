@@ -152,9 +152,15 @@ Ausstehend: Repository-JSON für das Image (TODO Block 4).
 
 Nur wählen, wenn Docker nicht zur Verfügung steht. pi-gen läuft nativ auf
 Debian-basierten Systemen; für **Trixie-Ziele (2025)** sollte der Host selbst
-aktuell sein — bei älteren Hosts (z. B. Ubuntu 22.04) können nach dem
-Bootstrap weitere Inkompatibilitäten auftreten, die im Docker-Container
-nicht existieren.
+aktuell sein — bei älteren Hosts können nach dem Bootstrap weitere
+Inkompatibilitäten auftreten, die im Docker-Container nicht existieren.
+
+**Ubuntu 22.04 (jammy):** qemu-user-static 6.2 hat den OFD-Lock-Fix
+(≥ QEMU 5.1.0, Launchpad 1893010) — der **nativ Build** läuft dort mit
+Host-qemu ohne binfmt-Entry. Die **Tests** (make test, Q1a-Container-Boot)
+nutzen trotzdem den Container-qemu-Entry (MIN_MAJOR=8-Gate schützt gegen
+dokumentierte 6.2-Spawn-Grenzen, siehe tests/README, „Warum kein QEMU").
+Der **Keyring-Fehler** (siehe unten) bleibt das 22.04-spezifische Thema.
 
 Benötigte Pakete (laut `depends` des pi-gen-Checkouts):
 
