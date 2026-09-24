@@ -1,16 +1,18 @@
 # ros-pi-gen – eigene Raspberry-Pi-Images auf pi-gen-Basis
 
-Eigenes arm64-Image für Raspberry Pi 3+/4/5 auf Basis von Debian Trixie mit
-Docker CE und Ansible. Dieses Repo hält die pi-gen-Konfiguration (`config`)
-und eigene Stages (`stage-custom/05-docker-ansible`, `stage-custom/06-variant-*`,
-`stage-custom/07-accesspopup`); pi-gen selbst ist als
-[git-Submodul](https://github.com/RPi-Distro/pi-gen) (arm64-Branch, gepinnter
-Commit `74d08a3`) eingebunden und bleibt **unverändert** — gebaut wird mit
-`STAGE_LIST="stage0 stage1 stage2 stage-custom"`, wobei pi-gens `stage2`
-durchläuft (Sub-Stages 01–04) und `stage-custom` als zusätzliche Stage das
-RootFS übernimmt (`copy_previous`) und daraus exportiert. Kopieren in den
-pi-gen-Tree gibt es **nicht mehr** (Hintergrund: [TODO.md](TODO.md), Block 1,
-Idee b).
+Dieses Repo baut ein eigenes arm64-Image für Raspberry Pi 3+/4/5. Das Image basiert auf Debian Trixie und enthält Docker CE und Ansible bereits vorinstalliert. Als technische Basis dient pi-gen.
+
+## Welchen Weg wählen?
+
+| Weg | Wann wählen? |
+|---|---|
+| **Docker-Build (empfohlener Hauptweg)** | Läuft auf Linux-Hosts mit Docker (getestet: Ubuntu 20.04/22.04/24.04); Windows/macOS via Docker Desktop ungetestet. Der `debian:trixie`-Container bringt Keyring, debootstrap und qemu aktuell mit. |
+| **Vagrant-VM (Alternative)** | Wenn Docker auf dem Host nicht gewünscht ist oder Linux-spezifische Build-Probleme umgangen werden sollen; die VM stellt eine Ubuntu-24.04-Build-Umgebung bereit. |
+| **Nativer Build (Fallback)** | Nur verwenden, wenn Docker nicht verfügbar ist. **Dieser Weg ist nur auf Linux getestet.** |
+
+### Für Leser mit pi-gen-Vorwissen
+
+Dieses Repo hält die pi-gen-Konfiguration (`config`) und eigene Stages (`stage-custom/05-docker-ansible`, `stage-custom/06-variant-*`, `stage-custom/07-accesspopup`). pi-gen selbst ist als **git-Submodul** (*ein fremdes Repo, das an einem festen Commit eingebunden wird*) ([git-Submodul](https://github.com/RPi-Distro/pi-gen), arm64-Branch, gepinnter Commit `74d08a3`) eingebunden und bleibt **unverändert**. Gebaut wird mit `STAGE_LIST="stage0 stage1 stage2 stage-custom"`, wobei pi-gens `stage2` durchläuft (Sub-Stages 01–04) und `stage-custom` als zusätzliche Stage das RootFS übernimmt (`copy_previous`) und daraus exportiert. Eine Stage bzw. Sub-Stage ist dabei ein *nummerierter Bauabschnitt beim Image-Bau*. Kopieren in den pi-gen-Tree gibt es **nicht mehr** (Hintergrund: [TODO.md](TODO.md), Block 1, Idee b).
 
 **Schnellstart:**
 
@@ -20,35 +22,39 @@ make setup && make build      # Docker-Build, headless (Default)
 make test                     # Testinfra gegen deploy/
 ```
 
-**Empfohlener Weg:** Build mit Docker — der `debian:trixie`-Container bringt
-Keyring, debootstrap und qemu aktuell mit, auf dem Host ist nur Docker Engine
-nötig; ältere Hosts (hier: Ubuntu 20.04 mit qemu 4.2.1) werden über das
-binfmt Version-Gate bedient (temporärer Container-qemu-Entry, trap-gesichert
-geräumt — Details: [TODO.md](TODO.md), Block 3). Auf modernen Hosts (≥ qemu 8)
-greift das Gate nicht ein. Der native Build ist die Rückfallebene ohne Docker
-(→ [Nativer Build](#nativer-build-ohne-docker)), als Build-Umgebung mit
-moderner qemu ohne Kernel-Eingriff dient die [Vagrant-VM](#build-in-der-vm-robotics-lab-vm)
-(Ubuntu 24.04). Als alternative, RPi-offizielle Build-Pipeline mit
-deklarativer YAML-Konfiguration wird außerdem `rpi-image-gen` diskutiert (→
-[Eigene-Raspberry-Pi-Images-rpi-image-gen.md](Eigene-Raspberry-Pi-Images-rpi-image-gen.md),
-Einordnung in [TODO.md](TODO.md), Block 1). Einen geplanten CI-Lauf
-(GitHub Actions: Build + Test + Imager-2.0-Repository-JSON, auch lokal
-lauffähig, ruft genau diese Make-Targets auf) beschreibt
-[GitHub-Image-Workflow.md](GitHub-Image-Workflow.md); einen Überblick über
-pi-gen selbst (Stages, Config, Docker) liefert
-[Pi-Gen-Tool.md](Pi-Gen-Tool.md).
+Das Ergebnis ist ein getestetes Image in `deploy/` (beim nativen Weg
+zusätzlich `pi-gen/deploy/` als Suchpfad); der Build dauert je nach Host
+etwa 30 Minuten bis mehrere Stunden. Ohne vorheriges
+`git submodule update --init` fehlen pi-gen und das Submodul mit den
+gepinnten Commits — der Build kann dann nicht korrekt starten.
+
+**Einordnung der Wege:** Build mit Docker ist der empfohlene Hauptweg — der `debian:trixie`-Container bringt Keyring, debootstrap und qemu aktuell mit, auf dem Host ist nur Docker Engine nötig; ältere Hosts (hier: Ubuntu 20.04 mit qemu 4.2.1) werden über das binfmt Version-Gate bedient (temporärer Container-qemu-Entry, trap-gesichert geräumt — Details: [TODO.md](TODO.md), Block 3). Auf modernen Hosts (≥ qemu 8) greift das Gate nicht ein. Der native Build ist die Rückfallebene ohne Docker (→ [Nativer Build](#nativer-build-ohne-docker)). Als Build-Umgebung mit moderner qemu ohne Kernel-Eingriff dient die [Vagrant-VM](#build-in-der-vm-robotics-lab-vm) (Ubuntu 24.04). Als alternative, RPi-offizielle Build-Pipeline mit deklarativer YAML-Konfiguration wird außerdem `rpi-image-gen` diskutiert (→ [Eigene-Raspberry-Pi-Images-rpi-image-gen.md](Eigene-Raspberry-Pi-Images-rpi-image-gen.md), Einordnung in [TODO.md](TODO.md), Block 1). Einen geplanten CI-Lauf (GitHub Actions: Build + Test + Imager-2.0-Repository-JSON, auch lokal lauffähig, ruft genau diese Make-Targets auf) beschreibt [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md); einen Überblick über pi-gen selbst (Stages, Config, Docker) liefert [Pi-Gen-Tool.md](Pi-Gen-Tool.md).
+
+**AccessPoint-Fallback (AccessPopup):** SSID: `<hostname>-AP` (Fallback: `Roboter-AP`) · WLAN-Passwort: `Pi-WLAN-Setup-2026` · Web-UI: `http://192.168.50.5:8052`. Details: [AccessPopup – WLAN-AP-Fallback mit Web-UI](#accesspopup--wlan-ap-fallback-mit-web-ui).
 
 ## Voraussetzungen
 
-- **Docker-Weg (empfohlen):** Docker Engine; `docker ps` muss ohne Fehler
-  laufen.
-- **Nativer Weg:** Debian-basiertes OS plus Paketliste (Details im
-  [nativen Abschnitt](#nativer-build-ohne-docker)); Ubuntu ≤ 22.04 braucht
-  zusätzlich ein neueres `debian-archive-keyring` (Trixie-Keys).
-- **Beide Wege:** 20–40 GB Plattenplatz, Dauer 30 min bis mehrere Stunden;
-  Pfad ohne Leerzeichen (debootstrap-Beschränkung).
+### Docker-Weg (empfohlen)
 
-### qemu/binfmt nach Ubuntu-Version (Docker-Weg)
+Docker Engine; `docker ps` muss ohne Fehler laufen. Der Docker-Weg ist der empfohlene Hauptweg; Docker Desktop unter Windows/macOS ist ungetestet.
+
+### Vagrant-Weg (Alternative)
+
+Die [Vagrant-VM](#build-in-der-vm-robotics-lab-vm) ist eine Alternative, wenn kein Docker auf dem Host gewünscht ist oder Linux-spezifische Build-Probleme umgangen werden sollen.
+
+### Nativer Weg (Fallback)
+
+Debian-basiertes OS plus Paketliste (Details im [nativen Abschnitt](#nativer-build-ohne-docker)). Ubuntu ≤ 22.04 braucht zusätzlich ein neueres `debian-archive-keyring` (Trixie-Keys).
+
+### Gemeinsame Anforderungen
+
+20–40 GB Plattenplatz, Dauer 30 min bis mehrere Stunden; Pfad ohne Leerzeichen (debootstrap-Beschränkung).
+
+### qemu/binfmt: Randfall für alte Hosts
+
+`make build` regelt qemu/binfmt automatisch. Das ist ein historischer Randfall für alte Hosts (hier: Ubuntu 20.04 mit qemu 4.2.1) — auf modernen Hosts besteht kein Handlungsbedarf.
+
+#### Details für Fortgeschrittene
 
 Der arm64-Container läuft unter dem Host-qemu (binfmt_misc). Ob dafür ein
 temporärer Container-qemu-Entry nötig ist, hängt von der Host-qemu-Version
@@ -68,7 +74,10 @@ OFD-Fix-Schwelle = QEMU 5.1.0 (Launchpad 1893010, Commit 2d92c6827ca0).
 Nativer Weg: 22.04-Hinweis im
 [Nativen-Build-Abschnitt](#nativer-build-ohne-docker).
 
-## Build mit Make (empfohlener Weg)
+
+## Build mit Make
+
+### Was passiert im Hintergrund
 
 Das Makefile im Repo-Root ist der Thin-Wrapper für Setup, Build und Test —
 dieselben Targets nutzt der geplante CI-Lauf
@@ -89,7 +98,7 @@ make ci        # alles nacheinander: venv lint setup build test
 
 Was `make setup` (Default `MODE=stage-custom`) tut:
 
-- prüft, dass das Submodul genau auf dem gepinnten Commit steht (wird nie
+- prüft, dass das git-Submodul genau auf dem gepinnten Commit steht (wird nie
   automatisch geändert — Pin-Updates sind bewusste Commits)
 - setzt `pi-gen/stage2/SKIP_IMAGES` (in pi-gens `.gitignore` enthalten → der
   Submodul-Status bleibt sauber): `stage2` läuft vollständig durch
@@ -128,6 +137,7 @@ Sub-Stages (in `pi-gen/stage2/` bzw. `stage-custom/`, gitignored), dann
 RootFS-Seeding: [Ansible-im-Build.md](Ansible-im-Build.md). Achtung:
 SKIP-Dateien nach dem Test wieder entfernen (Vollbuild als periodischer
 Verifizierungsschritt).
+
 
 ## Overlay einbringen (Legacy, `MODE=overlay`)
 
@@ -168,18 +178,18 @@ setzt darauf auf. Imager 1.x ist untauglich (nimmt fälschlich
 2026-09-20 belegt; `ENABLE_CLOUD_INIT=1` ist in der `config` gepinnt).
 Ausstehend: Repository-JSON für das Image (TODO Block 4).
 
+
 ## Nativer Build (ohne Docker)
 
-Nur wählen, wenn Docker nicht zur Verfügung steht. pi-gen läuft nativ auf
+**Fallback: Dieser Weg ist nur auf Linux getestet.** Nur wählen, wenn Docker nicht zur Verfügung steht. pi-gen läuft nativ auf
 Debian-basierten Systemen; für **Trixie-Ziele (2025)** sollte der Host selbst
 aktuell sein — bei älteren Hosts können nach dem Bootstrap weitere
 Inkompatibilitäten auftreten, die im Docker-Container nicht existieren.
 
 **Ubuntu 22.04 (jammy):** qemu-user-static 6.2 hat den OFD-Lock-Fix
-(≥ QEMU 5.1.0, Launchpad 1893010) — der **nativ Build** läuft dort mit
-Host-qemu ohne binfmt-Entry. Die **Tests** (make test, Q1a-Container-Boot)
-nutzen trotzdem den Container-qemu-Entry (MIN_MAJOR=8-Gate schützt gegen
-dokumentierte 6.2-Spawn-Grenzen, siehe tests/README, „Warum kein QEMU").
+(≥ QEMU 5.1.0, Launchpad 1893010) und ist in der Q1a-Matrix empirisch
+grün (tests/README.md, „Warum kein QEMU“) — nativer Build und Tests
+laufen dort mit Host-qemu, ohne binfmt-Entry (gemessen 2026-09-24).
 Der **Keyring-Fehler** (siehe unten) bleibt das 22.04-spezifische Thema.
 
 Benötigte Pakete (laut `depends` des pi-gen-Checkouts):
@@ -194,7 +204,8 @@ Zusätzlich beachten:
 
 - **Cross-Build von x86_64:** `qemu-user-static` statt `qemu-user-binfmt`
   installieren (Ubuntu-Binaries sind dynamisch gelinkt und scheitern im
-  Chroot). Prüfung: `arch-test arm64` → `arm64: ok`.
+  Chroot — einer isolierten Dateisystem-Umgebung fürs Bauen).
+  Prüfung: `arch-test arm64` → `arm64: ok`.
 - **Ubuntu ≤ 22.04 (jammy):** `debian-archive-keyring` (Version 2021.1.1)
   enthält die Debian-Trixie-Keys nicht — der Stage-0-Bootstrap bricht mit
   `E: Release signed by unknown key` ab. Neueres Paket von Debian
@@ -247,10 +258,10 @@ als git-Submodul unter `vm/robotics-lab-vm` eingebunden, gesteuert per
 Vagrant/VirtualBox). Der Grund: der Build-Host hier ist Ubuntu 20.04 mit
 qemu-user-static 4.2.1, dessen binfmt-Emulation OFD-Dateisperren nicht
 unterstützt (Details: [TODO.md](TODO.md), Block 3) — `make build` umgeht
-das per temporärem binfmt-Entry. In der VM (qemu-user-static ≥ 8) greift
-das **Version-Gate** (`tools/binfmt.sh`): der Kernel bleibt **komplett
-unangetastet**, kein Entry wird gesetzt. Plus CI-Parität — GitHub-Runner
-fahren ebenfalls 24.04.
+das per temporärem binfmt-Entry. In der VM (qemu-user-static 8.2.2, über
+der Gate-Schwelle `MIN_MAJOR=6`) greift das **Version-Gate**
+(`tools/binfmt.sh`): der Kernel bleibt **komplett unangetastet**, kein
+Entry wird gesetzt. Plus CI-Parität — GitHub-Runner fahren ebenfalls 24.04.
 
 Die Box `ubuntu-2404-desktop` (26.09.11, lokal registriert — kein
 Download) bringt Docker CE, qemu-user-static und binfmt-support bereits
@@ -411,6 +422,7 @@ Die Image-Suche deckt `deploy/` (Docker-Build) und `pi-gen/deploy/`
 (nativ/manuell) ab; Q0f akzeptiert Varianten-Sub-Stages in
 `stage-custom` wie auch alte `stage2/06-variant`-Logs.
 
+
 ## Troubleshooting
 
 ### `Container pigen_work already exists and you did not specify CONTINUE=1` (Docker-Weg)
@@ -503,19 +515,20 @@ und `qemu-user-static` installieren; Prüfung mit `arch-test arm64`
 (→ `arm64: ok`). Details in der pi-gen-README (Abschnitt `binfmt_misc`).
 Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 
+
 ## Struktur
 
 | Datei | Zweck |
 |---|---|
 | `config` | pi-gen-Konfiguration (IMG_NAME, RELEASE=`trixie`, `STAGE_LIST`, `ENABLE_SSH`, Locale/Zeitzone) |
-| `pi-gen/` | git-Submodul (arm64-Branch, gepinnt `74d08a3`) — unverändert pristine; Updates nur durch bewusste Pin-Änderung |
+| `pi-gen/` | git-Submodul (arm64-Branch, gepinnt `74d08a3`) — unverändert (siehe Einleitungsblock); Updates nur durch bewusste Pin-Änderung |
 | `stage-custom/` | eigenes Stage-Dir, hängt per `STAGE_LIST` hinter pi-gens stage2; enthält `prerun.sh` (copy_previous) + `EXPORT_IMAGE` (Export aus diesem Stage) |
 | `stage-custom/05-docker-ansible/` | Docker (offizielles docker.com-Repository, Suite `trixie`) + Ansible + Werkzeuge |
 | `stage-custom/06-variant-headless/` | Headless-Pakete (openssh-server, network-manager); wird per SKIP-Datei aktiviert (Default) |
 | `stage-custom/06-variant-desktop/` | Desktop-Pakete (xfce4, lightdm, xserver-xorg); `01-run.sh` aktiviert LightDM bedingungslos — Existenz der Sub-Stage = Schalter |
 | `stage-custom/07-accesspopup/` | AccessPopup (AP-Fallback, gepinnt `ba6eff1…`, GPL-3.0) + Web-UI + Captive-Redirect + nftables-Isolation + hostname-SSID; Details im [AccessPopup-Abschnitt](#accesspopup--wlan-ap-fallback-mit-web-ui) |
 | `Makefile` | Thin-Wrapper: `venv lint setup build test ci` (identisch lokal wie in CI, siehe [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2) + VM-Targets (`vm-*`, siehe [Build in der VM](#build-in-der-vm-robotics-lab-vm)) |
-| `tools/binfmt.sh` | qemu-Emulation-Entry: Version-Gate (Host-qemu ≥ 8 → kein Eingriff) + temporärer Container-qemu-Entry für ältere Hosts |
+| `tools/binfmt.sh` | qemu-Emulation-Entry: Version-Gate (Host-qemu ≥ 6 → kein Eingriff) + temporärer Container-qemu-Entry für ältere Hosts |
 | `tools/build-docker.sh` | Build-Orchestrierung: binfmt-Entry setzen → build-docker.sh → cleanup immer (trap EXIT/INT/TERM, Ctrl+C inklusive) |
 | `vm/robotics-lab-vm/` | git-Submodul ([robotics-lab-vm](https://codeberg.org/kraeml/robotics-lab-vm)) — Vagrant-VM Ubuntu 24.04 als Build-Umgebung (siehe [Build in der VM](#build-in-der-vm-robotics-lab-vm)) |
 | `work/`, `deploy/` | Build-Erzeugnisse (gitignored): pi-gen-Arbeitsverzeichnis bzw. Image + `build-docker.log` |

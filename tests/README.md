@@ -34,7 +34,7 @@ idempotent darin und ruft pytest auf. Alternativ direkt:
 
 | Werkzeug | Wofür |
 |---|---|
-| Docker Engine + arm64-Emulation | Container-Tests (Q1a, Q2–Q9, hostname-SSID) — `docker run --platform linux/arm64 debian:trixie true` muss gehen; die Suite setzt den nötigen OFD-tauglichen Container-qemu-Entry **selbst** (Sessionstart, `tools/binfmt.sh setup` — gleicher Version-Gate-Mechanismus wie beim Build; auf qemu ≥ 8-Hosts No-op; Opt-out `PIGEN_TEST_NO_BINFMT=1`). Hintergrund: nach `make build` ist der Build-Entry entfernt und Host-qemu 4.x wedged systemd beim Q1a-Container-Boot (fcntl-OFD → EINVAL) |
+| Docker Engine + arm64-Emulation | Container-Tests (Q1a, Q2–Q9, hostname-SSID) — `docker run --platform linux/arm64 debian:trixie true` muss gehen; die Suite setzt den nötigen OFD-tauglichen Container-qemu-Entry **selbst** (Sessionstart, `tools/binfmt.sh setup` — gleicher Version-Gate-Mechanismus wie beim Build; auf Host-qemu ≥ 6 (MIN_MAJOR) No-op; Opt-out `PIGEN_TEST_NO_BINFMT=1`). Hintergrund: nach `make build` ist der Build-Entry entfernt und Host-qemu 4.x wedged systemd beim Q1a-Container-Boot (fcntl-OFD → EINVAL) |
 | `7z`, `debugfs` (e2fsprogs) | Boot-Partition entpacken, ext4 lesen (ohne Root) |
 | nftables-Hilfscontainer | Q6 (wird einmalig gebaut, dann gecached) |
 
