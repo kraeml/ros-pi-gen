@@ -142,14 +142,6 @@ class NMprofiles:
 				l.append(self.wifi_profiles[i]["name"])
 		return l
 
-	def wifi_prof_ssid_list(self):
-		"""List the wifi profile SSID's for local network scan"""
-		l=[]
-		for i in range(len(self.wifi_profiles)):
-			if self.wifi_profiles[i]["mode"] == "infrastructure":
-				l.append(self.wifi_profiles[i]["ssid"])
-		return l
-		
 	def ap_prof_list(self):
 		"""list of AccessPoint profiles"""
 		l=[]
@@ -166,24 +158,6 @@ class NMprofiles:
 				l.append(self.wifi_profiles[i]["ssid"])
 		return l
 
-def scanwifi(def_wifi):
-	"""get ssid's in range"""
-	bss = []
-	for w in range(3):
-			#scans mutiple times as local SSIDs don't all appears on first scans. Mutiple scans capture additional networks. 
-			iwdata = subprocess.run(['sudo','iw','dev',def_wifi,'scan', 'ap-force'], capture_output=True, text=True)
-			found_ssid = [line.removeprefix('\tSSID: ') for line in iwdata.stdout.splitlines() if 'SSID:' in line and 'x00' not in line]
-			found = [*found_ssid]
-			time.sleep(2)
-	if found:
-		return undup_list(found)
-	else:
-		return ["iwerror " + iwdata.stderr]
-		
-def undup_list(self):
-	"""Remove Duplicates from List"""
-	return list(dict.fromkeys(self))
-	
 def get_hostname():
 	hst = subprocess.run(['sudo','nmcli','general','hostname'],capture_output=True, text=True, timeout=10)
 	if hst.returncode == 0:
@@ -192,18 +166,17 @@ def get_hostname():
 		return "Hostname not available"
 
 def create_new_profile(args):
-	#Args should be tuple - profile name, password
-	if args[0] == 'AP':
-		subprocess.run(['sudo','nmcli','connection','down','AccessPopup'])
-	x = subprocess.run(['sudo','nmcli' ,'device','wifi','connect',args[0],'password',args[1]])
-	if x.returncode == 0:
-		subprocess.run(['sudo','nmcli','connection','reload'])
-		return 0
-	else:
-		subprocess.run(['sudo','nmcli','connection','delete',args[0]])
-		subprocess.run(['sudo','nmcli','connection','reload'])
-		start_nw()
+	if not isinstance(args, (list, tuple)) or len(args) < 2:
 		return 1
+	ssid, password = args[:2]
+	result = subprocess.run(
+		['sudo', '/usr/local/sbin/accesspopup-connect-request'],
+		input=json.dumps({'ssid': ssid, 'password': password}),
+		capture_output=True,
+		text=True,
+		timeout=20,
+	)
+	return 0 if result.returncode == 0 else 1
 	
 def delete_profile(profile):
 	profs = NMstat.get_wifi_profiles()
@@ -230,38 +203,40 @@ def edit_nw_profile(self):
 	return r
 
 
-def edit_accesspopup(self):
-	# Edits config in accesspopup.conf
-	file_p = self[2]
-	new_line = f"{self[0]}'{self[1]}'\n"
-
-	tmp_file_path = None
+def edit_accesspopup(args):
 	try:
-		with tempfile.NamedTemporaryFile('w', delete=False) as tmp_file:
-			with open(file_p, 'r') as original_file:
-				for line in original_file:
-					if line.strip().startswith(self[0]):
-						tmp_file.write(new_line)
-					else:
-						tmp_file.write(line)
-			tmp_file_path = tmp_file.name
-
-		with open(tmp_file_path, 'rb') as f:
-			result = subprocess.run(
-				['sudo', 'tee', file_p],
-				stdin=f,
-				check=False,
-				capture_output=True
-			)
-
-		if result.returncode != 0:
+		payload = args if isinstance(args, dict) else json.loads(args)
+		key = payload.get("key")
+		value = payload.get("value")
+		if key not in ("ap_ssid=", "ap_pw=") or not isinstance(value, str):
 			return 1
-
-	finally:
-		# Clean up the temporary file if it was created
-		if tmp_file_path and os.path.exists(tmp_file_path):
-			os.remove(tmp_file_path)
-	return 0
+		if not value or any(ord(char) < 32 or ord(char) == 127 or char == "'" for char in value):
+			return 1
+		if key == "ap_pw=" and not 8 <= len(value.encode("utf-8")) <= 63:
+			return 1
+		if key == "ap_ssid=" and not 1 <= len(value.encode("utf-8")) <= 32:
+			return 1
+		new_line = f"{key}'{value}'\n"
+		tmp_path = None
+		try:
+			with tempfile.NamedTemporaryFile('w', delete=False) as tmp_file:
+				with open('/etc/accesspopup.conf', 'r') as original_file:
+					for line in original_file:
+						tmp_file.write(new_line if line.strip().startswith(key) else line)
+				tmp_file.flush()
+				os.fchmod(tmp_file.fileno(), 0o644)
+				tmp_path = tmp_file.name
+			with open(tmp_path, 'rb') as updated:
+				result = subprocess.run(
+					['sudo', 'tee', '/etc/accesspopup.conf'], stdin=updated,
+					capture_output=True, timeout=10
+				)
+			return 0 if result.returncode == 0 else 1
+		finally:
+			if tmp_path and os.path.exists(tmp_path):
+				os.unlink(tmp_path)
+	except (OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+		return 1
     
 def get_ap_details(self):
     file_p = self
@@ -381,8 +356,6 @@ class Messaging:
 			"LANP": lambda: NMstat.get_eth_profiles(),
 			"WIAC": lambda: NMstat.wifi_active(args),
 			"WIPL": lambda: NMstat.wifi_prof_list(),
-			"WISS": lambda: NMstat.wifi_prof_ssid_list(),
-			"SCAN": lambda: scanwifi(args),
 			"APED": lambda: edit_accesspopup(args),
 			"APGT": lambda: get_ap_details(args),
 			"DELP": lambda: delete_profile(args),

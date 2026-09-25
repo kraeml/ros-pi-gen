@@ -1,0 +1,163 @@
+#!/usr/bin/python3
+
+import fcntl
+import json
+import os
+import stat
+import subprocess
+import sys
+import tempfile
+import uuid
+
+REQUEST_DIR = "/run"
+
+
+def valid_credentials(ssid, password):
+    return (
+        isinstance(ssid, str)
+        and isinstance(password, str)
+        and 1 <= len(ssid.encode("utf-8")) <= 32
+        and 8 <= len(password.encode("utf-8")) <= 63
+        and not any(ord(char) < 32 or ord(char) == 127 for char in ssid + password)
+    )
+
+
+def read_request(path):
+    if os.path.dirname(path) != REQUEST_DIR or not os.path.basename(path).startswith("accesspopup-"):
+        raise ValueError("Invalid request path")
+    info = os.stat(path, follow_symlinks=False)
+    if info.st_uid != 0 or not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+        raise ValueError("Invalid request file")
+    with open(path, encoding="utf-8") as request_file:
+        payload = json.load(request_file)
+    if not valid_credentials(payload.get("ssid"), payload.get("password")):
+        raise ValueError("Invalid credentials")
+    return payload
+
+
+def escape_keyfile(value):
+    escaped = value.replace("\\", "\\\\")
+    escaped = escaped.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+    if escaped.startswith(" "):
+        escaped = "\\s" + escaped[1:]
+    if escaped.endswith(" "):
+        escaped = escaped[:-1] + "\\s"
+    return escaped
+
+
+def make_profile(ssid, password, profile_uuid):
+    name = f"Home WiFi {profile_uuid}"
+    content = "\n".join((
+        "[connection]",
+        f"id={name}",
+        f"uuid={profile_uuid}",
+        "type=wifi",
+        "interface-name=wlan0",
+        "autoconnect=true",
+        "autoconnect-priority=10",
+        "[wifi]",
+        "mode=infrastructure",
+        f"ssid={escape_keyfile(ssid)}",
+        "[wifi-security]",
+        "key-mgmt=wpa-psk",
+        f"psk={escape_keyfile(password)}",
+        "[ipv4]",
+        "method=auto",
+        "[ipv6]",
+        "method=auto",
+        "",
+    ))
+    return name, content
+
+
+def run(command, timeout=30):
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) != 1:
+        return 2
+    request_path = argv[0]
+    profile_path = None
+    profile_uuid = str(uuid.uuid4())
+    loaded = False
+    connected = False
+    timer_was_active = False
+    fallback_started = False
+    lock_fd = None
+    try:
+        lock_fd = os.open("/run/accesspopup-connect.lock", os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 2
+        request = read_request(request_path)
+        ssid = request["ssid"]
+        password = request["password"]
+        _, content = make_profile(ssid, password, profile_uuid)
+        timer_was_active = bool(request.get("timer_was_active"))
+        if timer_was_active:
+            run(["/usr/bin/systemctl", "stop", "AccessPopup.timer"])
+            run(["/usr/bin/systemctl", "stop", "AccessPopup.service"])
+            result = run(["/usr/bin/systemctl", "is-active", "--quiet", "AccessPopup.service"])
+            if result is not None and result.returncode == 0:
+                raise RuntimeError("AccessPopup service did not stop")
+        os.makedirs("/etc/NetworkManager/system-connections", mode=0o700, exist_ok=True)
+        fd, profile_path = tempfile.mkstemp(
+            prefix=f"accesspopup-{profile_uuid}-",
+            suffix=".nmconnection",
+            dir="/etc/NetworkManager/system-connections",
+        )
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as profile_file:
+            profile_file.write(content)
+        result = run(["/usr/bin/nmcli", "connection", "load", profile_path], timeout=20)
+        if result is None or result.returncode != 0:
+            raise RuntimeError("Unable to load WiFi profile")
+        loaded = True
+        result = run(["/usr/bin/nmcli", "connection", "down", "AccessPopup"])
+        if result is None or result.returncode != 0:
+            raise RuntimeError("Unable to stop setup access point")
+        result = run(["/usr/bin/nmcli", "connection", "up", "uuid", profile_uuid], timeout=60)
+        if result is not None and result.returncode == 0:
+            connected = True
+            if timer_was_active:
+                run(["/usr/bin/systemctl", "start", "AccessPopup.timer"])
+            return 0
+        run(["/usr/bin/nmcli", "connection", "delete", "uuid", profile_uuid])
+        loaded = False
+        run(["/usr/local/bin/accesspopup", "-a"], timeout=60)
+        fallback_started = True
+        run(["/usr/bin/systemctl", "start", "AccessPopup.timer"])
+        return 1
+    except BlockingIOError:
+        return 2
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, RuntimeError):
+        if loaded:
+            run(["/usr/bin/nmcli", "connection", "delete", "uuid", profile_uuid])
+        if not fallback_started:
+            run(["/usr/local/bin/accesspopup", "-a"], timeout=60)
+            fallback_started = True
+        if timer_was_active and fallback_started:
+            run(["/usr/bin/systemctl", "start", "AccessPopup.timer"])
+        return 1
+    finally:
+        try:
+            os.unlink(request_path)
+        except OSError:
+            pass
+        if lock_fd is not None:
+            os.close(lock_fd)
+        if profile_path and not connected:
+            try:
+                os.unlink(profile_path)
+            except OSError:
+                pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

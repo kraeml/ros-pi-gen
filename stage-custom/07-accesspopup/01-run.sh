@@ -50,16 +50,21 @@ cp -r files/acpu_web/. "${ROOTFS_DIR}/usr/local/bin/acpu_web/"
 install -m 0644 files/acpu_web.service "${ROOTFS_DIR}/etc/systemd/system/acpu_web.service"
 install -m 0644 files/acpu_web_app.service "${ROOTFS_DIR}/etc/systemd/system/acpu_web_app.service"
 install -m 0644 files/acpu_web_app.socket "${ROOTFS_DIR}/etc/systemd/system/acpu_web_app.socket"
+install -d -m 0755 "${ROOTFS_DIR}/usr/local/sbin"
+install -m 0755 files/accesspopup-connect-request "${ROOTFS_DIR}/usr/local/sbin/accesspopup-connect-request"
+install -m 0755 files/accesspopup-connect-worker "${ROOTFS_DIR}/usr/local/sbin/accesspopup-connect-worker"
+install -m 0644 files/acpu_web/pages/templates/add_network_result.html \
+    "${ROOTFS_DIR}/usr/local/bin/acpu_web/pages/templates/add_network_result.html"
 
 on_chroot << EOF
 set -e
 # Systemuser für die Web-UI (kein Login, kein Home)
 useradd -r -s /usr/sbin/nologin -d /nonexistent acpu 2>/dev/null || true
 
-# sudoers: Portal-Benutzer darf nur nmcli/iw/tee/Conf/AccessPopup
-# (upstream add_permissions; visudo-Prüfung im Chroot)
+# sudoers: Web-UI darf nur die benötigten NetworkManager-, Config- und AP-Befehle
+# (visudo-Prüfung im Chroot)
 cat > /etc/sudoers.d/acpu <<'EOT'
-acpu ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/sbin/iw, /usr/bin/tee, /etc/accesspopup.conf, /usr/local/bin/accesspopup
+acpu ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/sbin/iw, /usr/bin/tee /etc/accesspopup.conf, /usr/local/bin/accesspopup, /usr/local/sbin/accesspopup-connect-request
 EOT
 chmod 440 /etc/sudoers.d/acpu
 visudo -cf /etc/sudoers.d/acpu

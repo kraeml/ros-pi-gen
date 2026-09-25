@@ -36,13 +36,12 @@ geht es nur um das WLAN zu Hause.
    http://192.168.50.5:8052
    ```
    eingeben (wichtig: **http**, nicht https).
-4. **Heim-WLAN eintragen:** Im Portal „Add New WiFi Network" wählen →
-   aus der Liste dein Heim-WLAN auswählen („Refresh List" aktualisiert) oder
-   die SSID manuell eintippen → Passwort eintragen → verbinden.
-5. **Verbindung wechseln:** Die Portal-Seite bricht ab — **das ist normal.**
-   Verbinde jetzt dein Handy/Deinen Laptop mit deinem Heim-WLAN. Der Roboter
-   wechselt innerhalb von **2 Minuten** ins Heim-WLAN, der Roboter-WLAN-AP
-   verschwindet automatisch.
+4. **Heim-WLAN eintragen:** Im Portal „Add New WiFi Network“ wählen und
+   WLAN-Name (SSID) sowie Passwort manuell eingeben. Der Scan wird vermieden,
+   weil er den Access Point auf manchen Geräten unterbrechen kann.
+5. **Verbindung wechseln:** Der automatische Prüf-Timer pausiert während des
+   Versuchs. Bei Erfolg verbindest du dein Handy/Deinen Laptop mit dem
+   Heim-WLAN. Bei falschen Zugangsdaten wird der Roboter-AP wiederhergestellt.
 
 ## Typische Probleme
 
@@ -50,8 +49,8 @@ geht es nur um das WLAN zu Hause.
 |---|---|
 | Portal öffnet sich nicht | `http://192.168.50.5:8052` manuell im Browser aufrufen (http, nicht https) |
 | Browser warnt „kein Internet" | Normal — AP hat kein Internet. „Trotzdem verbinden"/„Bleiben" wählen |
-| Heim-WLAN fehlt in der Liste | Erst „Refresh List" drücken und kurz warten; funktioniert es nicht, SSID manuell eintippen |
-| „Falsches Passwort" beim Heim-WLAN | Einfach erneut über das Portal versuchen — das falsche Profil wird automatisch verworfen, es geht nichts kaputt |
+| Heim-WLAN wird nicht angezeigt | SSID immer manuell eintragen; der Scan ist absichtlich nicht Teil des Einrichtungsablaufs |
+| „Falsches Passwort" beim Heim-WLAN | Der Verbindungsversuch schlägt fehl und der Roboter-AP wird wiederhergestellt; Zugangsdaten erneut eingeben |
 | AP verschwindet, Roboter taucht im Heim-WLAN nicht auf | 1–2 Minuten warten; der Roboter wechselt selbst. Roboter-Schalter: kurz aus/an, dann startet der AP wieder (Problem-Suchmodus) |
 | Ich finde meinen Roboter nicht | AP-Name = Hostname + „-AP". Mehrere Roboter nebeneinander → die SSIDs unterscheiden sich |
 | Heim-WLAN geändert (neuer Router/Passwort) | Vorgang einfach wiederholen — erst AP, dann Portal, dann neue Daten |

@@ -355,14 +355,16 @@ zuständig (NetworkManager-AP-Modus, Prüfzyklus alle 2 Minuten, kein hostapd).
 
 **Konfiguration per Browser (ohne CLI):**
 
-1. Mit der AP-SSID des eigenen Roboters verbinden
-2. Bei üblichen Clients (iOS/Android/Windows) öffnet sich das Portal
-   automatisch (DNS-Wildcard + Port-80-Redirect auf die Web-UI); sonst
-   manuell `http://192.168.50.5:8052` aufrufen
-3. „Add New WiFi Network" → WLAN wählen/SSID eingeben, Passwort setzen →
-   Profil wird via NetworkManager gespeichert → Seite timeoutet absichtlich:
-   **jetzt mit dem neuen WLAN verbinden**; der Pi wechselt im nächsten
-   Prüfzyklus (≤ 2 min) und der AP verschwindet
+1. Mit der AP-SSID des eigenen Roboters verbinden.
+2. Das Portal öffnet sich eventuell automatisch (Best-Effort); andernfalls
+   `http://192.168.50.5:8052` im Browser aufrufen.
+3. „Add New WiFi Network“ öffnen und SSID sowie Passwort manuell eingeben.
+   Der Scan wird nicht verwendet, weil manche WLAN-Adapter dabei den AP
+   unterbrechen.
+4. Das Image speichert das WLAN-Profil und versucht anschließend die
+   Verbindung. Der automatische Prüf-Timer pausiert währenddessen und läuft
+   danach weiter. Bei Erfolg verbinde dein Handy/Laptop mit dem Heim-WLAN; bei
+   Fehlschlag wird der AP wiederhergestellt.
 
 **Web-UI nur im AP-Fenster:** die Web-Units (Port 8052) sind im Image
 deaktiviert und werden vom NM-Dispatcher
@@ -388,8 +390,8 @@ kein SSH, kein Docker/ROS-Zugriff. Bei AP-Ende wird die Regelgruppe entfernt.
   fizierte Web-UI bedenken
 
 **Bekannte Grenzen:** der AP↔WLAN-Wechsel unterbricht laufende SSH/VNC-
-Verbindungen; WLAN-Scan während aktivem AP ist je nach WLAN-Chip nicht
-möglich — die Web-UI bietet dann die manuelle SSID-Eingabe.
+Verbindungen. Die WLAN-Einrichtung über das Portal nutzt daher immer die
+manuelle SSID-Eingabe; der Scan während aktivem AP wird nicht aufgerufen.
 
 ## Testinfra (Gruppe Q automatisiert)
 

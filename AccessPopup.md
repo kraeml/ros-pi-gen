@@ -84,7 +84,7 @@ Der Roboter bleibt **ohne konfiguriertes WLAN erreichbar**. Genauer:
 - hostapd-Systemdienst kollidiert mit NM-AP-Modus, wenn er enabled ist
   (dnsmasq als Dienst analog; `dnsmasq-base` als Bibliothekspaket ist ok)
 - Beim AP→WLAN-Wechsel (und zurück) brechen SSH/VNC-Verbindungen ab
-- Scan während aktivem AP ist je nach Chip nicht möglich (→ manueller SSID-Fallback)
+- Scan während aktivem AP ist je nach Chip nicht möglich; die Web-UI nutzt deshalb manuelle SSID-Eingabe als Standard und scannt nicht
 
 ---
 
@@ -250,5 +250,5 @@ NM-Start, AP, Scan, Skriptlauf, Web-Units-enable.
 - Uniformes bekanntes AP-Passwort + auth-lose Web-UI: nur im AP-Fenster exponiert (Dispatcher-Gating); für Dauereinsatz Passwort ändern
 - First Boot: SSID ggf. kurz `raspberrypi-AP` bis cloud-init den Imager-Hostnamen setzt → `hostname`-Dispatcher-Event korrigiert nach (Testen)
 - Wechsel AP↔WLAN bricht SSH/VNC ab; Web-UI-Seite timeoutet beim Speichern absichtlich (Client muss ins neue WLAN wechseln)
-- Scan während aktivem AP je nach Chip unmöglich → Web-UI bietet manuelle SSID-Eingabe
+- Scan während aktivem AP je nach Chip unmöglich → Web-UI nutzt manuelle SSID-Eingabe als Standard und ruft den Scan nicht auf
 - Admin-Weg im laufenden WLAN: `sudo accesspopup -a` (Dauer-AP) → Web-UI erscheint im AP-Fenster; zurück mit `sudo accesspopup`

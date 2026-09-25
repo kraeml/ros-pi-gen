@@ -1,0 +1,74 @@
+#!/usr/bin/python3
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import uuid
+
+WORKER = "/usr/local/sbin/accesspopup-connect-worker"
+
+
+def main():
+    request_path = None
+    timer_was_active = False
+    try:
+        payload = json.load(sys.stdin)
+        ssid = payload.get("ssid")
+        password = payload.get("password")
+        if (
+            not isinstance(ssid, str)
+            or not isinstance(password, str)
+            or not 1 <= len(ssid.encode("utf-8")) <= 32
+            or not 8 <= len(password.encode("utf-8")) <= 63
+            or any(ord(char) < 32 or ord(char) == 127 for char in ssid + password)
+        ):
+            return 2
+        timer_state = subprocess.run(
+            ["/usr/bin/systemctl", "is-active", "AccessPopup.timer"],
+            capture_output=True,
+            timeout=10,
+        )
+        timer_was_active = timer_state.returncode == 0
+        if timer_was_active:
+            subprocess.run(
+                ["/usr/bin/systemctl", "stop", "AccessPopup.timer"],
+                capture_output=True,
+                timeout=10,
+                check=True,
+            )
+        fd, request_path = tempfile.mkstemp(prefix="accesspopup-", dir="/run")
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as request_file:
+            json.dump({"ssid": ssid, "password": password, "timer_was_active": timer_was_active}, request_file)
+        os.chown(request_path, 0, 0)
+        queued = subprocess.run(
+            [
+                "/usr/bin/systemd-run", f"--unit=accesspopup-connect-{uuid.uuid4().hex}",
+                "--collect", "--no-block", "--on-active=5s", WORKER, request_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if queued.returncode != 0:
+            if timer_was_active:
+                subprocess.run(["/usr/bin/systemctl", "start", "AccessPopup.timer"], capture_output=True, timeout=10)
+            return 1
+        request_path = None
+        return 0
+    except (AttributeError, OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        if timer_was_active:
+            subprocess.run(["/usr/bin/systemctl", "start", "AccessPopup.timer"], capture_output=True, timeout=10)
+        return 1
+    finally:
+        if request_path:
+            try:
+                os.unlink(request_path)
+            except OSError:
+                pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
