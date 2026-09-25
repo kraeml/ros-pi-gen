@@ -39,6 +39,10 @@ ROOTFS_MANIFEST: list[tuple[str, str]] = [
     ("/usr/local/bin/acpu_web/app.py", "exists"),
     ("/usr/local/bin/acpu_web/acpu_get_std.py", "exists"),
     ("/usr/local/bin/acpu_web/requirements.txt", "exists"),
+    ("/usr/local/sbin/accesspopup-connect-request", "exists"),
+    ("/usr/local/sbin/accesspopup-connect-worker", "exists"),
+    ("/usr/local/bin/acpu_web/pages/templates/add_network_result.html", "exists"),
+    ("/usr/local/bin/acpu_web/pages/templates/add_nw_manual.html", "exists"),
     ("/usr/local/bin/acpu_web/venv/bin/python3", "symlink"),
     # sudoers + Systemuser
     ("/etc/sudoers.d/acpu", "marker:/usr/local/bin/accesspopup"),
@@ -75,6 +79,9 @@ def test_image_rootfs_datei(pack, path, expectation):
         content = imageio.debugfs_cat(pack.root_img, path)
         marker = expectation.removeprefix("marker:")
         assert marker in content, f"Inhalts-Marker fehlt in {path}: {marker!r}"
+        if path == "/usr/local/bin/accesspopup":
+            assert 'ipv4.addresses "$ap_ip"' in content
+            assert 'ipv4.addr "$ap_ip"' not in content
     else:
         pytest.fail(f"unbekannte Erwartung: {expectation!r}")
 

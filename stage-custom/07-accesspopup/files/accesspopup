@@ -242,6 +242,11 @@ start_ap()
 	if [ $ex -eq 0 ]; then
 		ap_new_profile #if known AP profile not found, create it
 	fi
+	current_ap_ip="$(nmcli -g ipv4.addresses connection show "$ap_profile_name" 2>/dev/null)"
+	nmcli connection modify "$ap_profile_name" ipv4.method shared ipv4.addresses "$ap_ip" ipv4.gateway "$ap_gate" >/dev/null 2>&1 || return 1
+	if [ "$current_ap_ip" != "$ap_ip" ]; then
+		nmcli connection down "$ap_profile_name" >/dev/null 2>&1 || true
+	fi
 	apup="$(nmcli connection up "$ap_profile_name")" >/dev/null 2>&1
 	stat=$?
 	
@@ -319,9 +324,9 @@ sleep 3 #give time for the update on a slow Pi Zero W before checking all is ok.
 ap_new_profile()
 {
 #Create a AP profile
-nmcli device wifi hotspot ifname $wdev0 con-name "$ap_profile_name" ssid "$ap_ssid" band bg channel 6 password "$ap_pw" >/dev/null 2>&1
-nmcli connection modify "$ap_profile_name" ipv4.method shared ipv4.addr "$ap_ip" ipv4.gateway "$ap_gate" 802-11-wireless-security.group "ccmp" 802-11-wireless-security.pairwise "ccmp" 802-11-wireless-security.proto "rsn" >/dev/null 2>&1
-nmcli connection modify "$ap_profile_name" wifi.powersave disable
+nmcli device wifi hotspot ifname "$wdev0" con-name "$ap_profile_name" ssid "$ap_ssid" band bg channel 6 password "$ap_pw" >/dev/null 2>&1 || return 1
+nmcli connection modify "$ap_profile_name" ipv4.method shared ipv4.addresses "$ap_ip" ipv4.gateway "$ap_gate" 802-11-wireless-security.group "ccmp" 802-11-wireless-security.pairwise "ccmp" 802-11-wireless-security.proto "rsn" >/dev/null 2>&1 || return 1
+nmcli connection modify "$ap_profile_name" wifi.powersave disable >/dev/null 2>&1 || return 1
 ap_profile+="$ap_profile_name"
 nmcli connection reload
 check_pizerow

@@ -36,13 +36,9 @@ useful when there are mutiple devices with AccessPopup running, so you can ident
 This is because the profile will be deleted and the device will be left with no wifi connection if no Wifi network is in range."</P>
 
 <H2>Add New Wifi Network</H2>
-<p>Select the "Refresh List" button to see a list of nearby wifi networks you can choose to create a new connection for.<br>Please allow the scan to complete before clicking elsewhere.<br>This can take 30 seconds or so for the list to appear.</p>
-<p>If any of the Wifi networks that are configured on the ACPU_Device are in range then they will be shown underneath the selectable list. These can be connected to on the "Edit Wifi Profiles" page.</p>
-<p>When you have selected a new network from the list and clicked "Add Selected", you will be asked to enter the password.<br>When "Connect to Selected Network" is clicked, an attempt will be made to connect to the new network.</p>
-<p>If the Connection is successful the page will timeout as the Viewing device will now need to connect to the same selected network to reconnect to the ACPU_Device, if required.</p>
-<p>If the connection is not successful, such as the incorrect password,  then the new profile will be deleted. The ACPU_Device device will either connect to another known Wifi Network or if none are available the Access Point will be started. So you will need to locate what the ACPU_Device device has done to continue.</p>
-
-<p><b>Please Note</b> some laptop wifi devices are not able to scan for nearby networks if they have an Access Point active. If this is the case then you will be asked to manually enter the new networks SSID and Password instead of selecting the SSID from the list.<br>The Access Point will then be stopped and the ACPU_Device will attempt to connect to the entered WiFi network. Any issues such as an incorrect password will cause the profile to be deleted and the ACPU_Device will connected to a known Wifi Network or generates the Access Point</p>
+<p>Enter the exact WiFi name (SSID) and password manually. The setup portal does not scan while the Access Point is active because some WiFi adapters interrupt the AP during scans.</p>
+<p>When "Connect to WiFi" is clicked, the periodic AP/WiFi check pauses while the Raspberry Pi attempts to connect.</p>
+<p>If the connection succeeds, reconnect your phone or laptop to the configured WiFi network. If it fails, the new profile is removed and the AP is restored when the AP fallback was running before setup.</p>
 
 <H2>Devices warning of No Internet</H2>
 <img src="{{ url_for('static', path='img/no_internet_warning.png') }}" alt="Mobile Phone No Internet Warning Message" />

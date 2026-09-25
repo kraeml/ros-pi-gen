@@ -5,15 +5,24 @@ IMG_NAME='raspberrypi-trixie-custom'
 RELEASE='trixie'
 ARCH='arm64'
 DEPLOY_COMPRESSION='xz'
-export PIGEN_VARIANT='headless'
+# Variante headless/desktop wird nicht mehr hier gesetzt, sondern über die
+# Sub-Stage-Auswahl in stage-custom gesteuert (make VARIANT=headless|desktop
+# toggelt SKIP-Dateien — siehe Makefile und README, „Variante wählen“).
 # BASE_DIR setzen, falls unset (build-docker.sh sourced diese Datei mit set -u,
 # bevor build.sh BASE_DIR definiert; im Container setzt build.sh BASE_DIR=/pi-gen
 # vor dem Sourcing, daher greift der Fallback nur auf dem Host)
 export BASE_DIR="${BASE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-# Nur Stage 0–2 bauen (Basis + Custom-Stages) und aus Stage 2 exportieren –
+# Nur Stage 0–2 + stage-custom bauen und aus stage-custom exportieren –
 # Stage 3–5 des arm64-Branches sind RPi-OS-Desktop-Varianten und
-# exportieren eigene Images (kein Bedarf für unser headless Image)
-export STAGE_LIST="${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2"
+# exportieren eigene Images (kein Bedarf für unser headless Image).
+# pi-gens stage2 läuft vollständig durch (01-sys-tweaks bis 04-cloud-init),
+# exportiert aber nicht (SKIP_IMAGES setzt make setup); stage-custom hängt
+# als zusätzliche Stage an, übernimmt per copy_previous das stage2-RootFS
+# und exportiert daraus. Der ${STAGE_LIST:-…}-Default macht die config nativ
+# wie im Container brauchbar: nativ überschreibt eine Env-STAGE_LIST (setzt
+# make build für absolute Pfade), im Container greift dieser Default mit
+# BASE_DIR=/pi-gen (stage-custom wird dorthin gemountet, siehe Makefile).
+export STAGE_LIST="${STAGE_LIST:-${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2 ${BASE_DIR}/stage-custom}"
 ENABLE_SSH=1
 LOCALE_DEFAULT='de_DE.UTF-8'
 TIMEZONE_DEFAULT='Europe/Berlin'

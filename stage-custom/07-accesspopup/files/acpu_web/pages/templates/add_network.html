@@ -1,0 +1,9 @@
+{% extends 'core.html' %}
+{% block core_body %}
+<div class="area">
+<h3>Set up a WiFi network</h3>
+<p>Enter the exact WiFi name (SSID) and password. Scanning is not used because some WiFi adapters interrupt the access point during a scan.</p>
+<p>The access point will disconnect while the Raspberry Pi tries to join the network. If the credentials are incorrect, the setup access point will return.</p>
+<a class="submit-btn grn" href="/manual_add">Enter WiFi details</a>
+</div>
+{% endblock core_body %}

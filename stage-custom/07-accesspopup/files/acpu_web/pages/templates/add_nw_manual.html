@@ -1,0 +1,18 @@
+{% extends 'core.html' %}
+{% block core_body%}
+<div class="area">
+<h2>Add New WiFi Network</h2>
+<p>Enter the exact WiFi name (SSID) and password. The access point will disconnect while the Raspberry Pi tries to connect.</p>
+<p>If the connection fails, the setup access point and this portal will be restored.</p>
+{% if message %}
+  <p style="color: red;">{{ message }}</p>
+{% endif %}
+<form method="post" action="/add_network_manual">
+    <p>WiFi name (SSID)<br>
+    <input type="text" name="new_nw_ssid" maxlength="32" required></p>
+    <p>WiFi password<br>
+    <input type="password" name="new_nw_pass" minlength="8" maxlength="63" required></p>
+    <button type="submit" class="submit-btn grn">Connect to WiFi</button>
+</form>
+</div>
+{% endblock core_body%}

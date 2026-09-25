@@ -5,10 +5,10 @@
 #Copyright Graeme Richards. RaspberryConnect.com
 
 import pathlib
-from fastapi import FastAPI, Request, Form, status, BackgroundTasks
+from fastapi import FastAPI, Request, Form, status
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 import subprocess, os, tempfile, shutil
 
@@ -28,9 +28,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 script_path="/etc/"
 scriptname="accesspopup.conf"
 
-scan_result = None
-myssids_in_scan = None
-scan_running = False
 wifi_dev = 'wlan0'
 Comms = None
 
@@ -114,20 +111,15 @@ def get_wifidev(filepath= script_path + scriptname):
         print(f"An error occurred: {e}")
     quit()
 
-def get_local_wifi():
-    Comms.send_out("SCAN",wifi_dev)
-    w = wait_for_msg()
-    return w
-
 def update_ap_profile(new_ssid,new_pwd):
     """Change AP details in Accesspopup"""
     file_p = script_path + scriptname
     if new_ssid or new_pwd:
         if new_ssid:
-            Comms.send_out("APED",('ap_ssid=',new_ssid,file_p))
+            Comms.send_out("APED",{"key":"ap_ssid=","value":new_ssid})
             w = wait_for_msg()
         if new_pwd:
-            Comms.send_out("APED",('ap_pw=',new_pwd,file_p))
+            Comms.send_out("APED",{"key":"ap_pw=","value":new_pwd})
             w = wait_for_msg()
         Comms.send_out("DELP","AccessPopup")
         w = wait_for_msg()
@@ -192,15 +184,15 @@ async def post_ap_edit(request: Request, ap_ssid: str = Form(""), ap_pwd: str = 
     message = ""
     if ap_ssid == "" and ap_pwd == "":
         message = "Nothing entered. No Change"
-    elif ap_pwd and len(ap_pwd) < 8:
-        message = "Invalid password. It must be at least eight characters"
+    elif ap_pwd and not 8 <= len(ap_pwd.encode("utf-8")) <= 63:
+        message = "Invalid password. It must be between eight and 63 bytes"
+    elif ap_ssid and not 1 <= len(ap_ssid.encode("utf-8")) <= 32:
+        message = "Invalid SSID. It must be between one and 32 bytes"
+    elif any(ord(char) < 32 or ord(char) == 127 for char in new_ssid + new_pwd) or "'" in new_ssid or "'" in new_pwd:
+        message = "SSID and password cannot contain control characters or apostrophes"
     else:
         update_ap_profile(new_ssid, new_pwd)
-        message = (
-            f"AccessPopup updated to the SSID of '{new_ssid}' "
-            f"and the password of '{new_pwd}'\n"
-            "This will be available when the access point is next started"
-        )
+        message = f"AccessPopup updated for SSID '{new_ssid}'. The change applies the next time the access point starts."
 
     # Get the actual saved values after update (ensures placeholders are correct)
     Comms.send_out("APGT", file_p)
@@ -304,77 +296,40 @@ async def ap_delete(request: Request, profile: str = Form(...), confirm: str = F
 #Setup a New Wifi NW
 @app.get("/add_network",response_class=HTMLResponse)
 async def add_network(request: Request):
-    return templates.TemplateResponse("add_network.html", {
-        "newwifi":"", 
-        "request":request,
-        "message":""
-    })
-    
-@app.post("/refresh_list", response_class=HTMLResponse)
-async def refresh_nw_list(
-    request: Request,
-    refresh_list: str = Form(...),
-    background_tasks: BackgroundTasks = None):
-
-    msg = ""
-    if refresh_list == "1":
-        if not scan_running:
-            background_tasks.add_task(do_scan)
-            msg = "Scanning… please wait."
-        else:
-            msg = "A scan is already in progress. Please wait."
-
-    return templates.TemplateResponse("add_network.html", {
-        "newwifi": [],
-        "request": request,
-        "message": msg
-    })
-
-@app.get("/scan_status")
-async def scan_status():
-    """Poll scan progress (always returns JSON)."""
-    if scan_running:
-        return JSONResponse({"status": "running"})
-
-    if scan_result is not None:
-        if "-95" in scan_result[0]:
-            return JSONResponse({"status": "error", "redirect": "/manual_add"})
-        else:
-            return JSONResponse({
-                "status": "done",
-                "results": scan_result,
-                "mywifi": myssids_in_scan
-            })
-
-    return JSONResponse({"status": "idle"})
+    return RedirectResponse(url="/manual_add", status_code=status.HTTP_303_SEE_OTHER)
 
 @app.get("/manual_add")
 async def manual_add(request: Request):
-    """Show manual add page if scan failed (-95)."""
     return templates.TemplateResponse("add_nw_manual.html", {"request": request})
 
 @app.post("/add_network_manual", response_class=HTMLResponse)
-async def add_network_manual(request: Request, new_nw_ssid: str = Form(...), new_nw_pass:str = Form(...)):
-	if not new_nw_pass.strip() or not new_nw_ssid.strip():
-		message = "Please enter both a SSID and a Password"
-	else:
-		if len(new_nw_pass.strip()) >=8:
-			Comms.send_out("ADSL", ( new_nw_ssid.strip(),new_nw_pass.strip(),'AP') )
-			x = wait_for_msg()
-			if x == 0:
-				message = new_nw_ssid.strip() + "profile created and connected."
-			elif x == 1:
-				message = "There was a problem with the connection. See the HomePage for the current connection"		
-		else:
-			message = "The password is less than 8 characters. Try a longer password"
-			
-	return templates.TemplateResponse("add_nw_manual.html", {
-		"request": request,
-		"message": message,
-	})	
-	
-    
+async def add_network_manual(request: Request, new_nw_ssid: str = Form(...), new_nw_pass: str = Form(...)):
+    ssid = new_nw_ssid
+    password = new_nw_pass
+    if not ssid.strip() or not password:
+        message = "Please enter both a SSID and a Password"
+    elif not 1 <= len(ssid.encode("utf-8")) <= 32:
+        message = "The WiFi name must be between 1 and 32 bytes long"
+    elif not 8 <= len(password.encode("utf-8")) <= 63:
+        message = "The WiFi password must be between 8 and 63 bytes long"
+    else:
+        Comms.send_out("ADSL", (ssid, password))
+        result = wait_for_msg()
+        if result == 0:
+            return templates.TemplateResponse("add_network_result.html", {
+                "request": request,
+                "message": f"Connection attempt to {ssid} has started. The AP fallback timer was active; reconnect your device to the configured WiFi network if the Pi joins successfully.",
+                "success": True,
+            })
+        message = "Could not prepare the WiFi connection. Check the SSID and password, ensure no setup attempt is already running, and try again."
+
+    return templates.TemplateResponse("add_nw_manual.html", {
+        "request": request,
+        "message": message,
+    })
+
 @app.post("/new_nw", response_class=HTMLResponse)
+
 async def add_network_pw(request: Request, new_nw: str = Form(...)):   
     return templates.TemplateResponse("add_network_pw.html", {
         "request": request,
@@ -384,22 +339,22 @@ async def add_network_pw(request: Request, new_nw: str = Form(...)):
 
 @app.post("/add_network_pw", response_class=HTMLResponse)
 async def add_network_pw(request: Request, new_nw_pass: str = Form(...), profile: str = Form(...)):
-    #print("Profile selected is " + profile)
-    if not new_nw_pass.strip():
-        message = "Nothing Entered, No Change"
+    password = new_nw_pass
+    if not password:
+        message = "Nothing entered; no change was made"
+    elif not 8 <= len(password.encode("utf-8")) <= 63:
+        message = "The WiFi password must be between 8 and 63 bytes long"
     else:
-        if len(new_nw_pass.strip()) >= 8: 
-            Comms.send_out("ADSL", ( profile,new_nw_pass.strip(),'') )
-            x = wait_for_msg()
-            if x == 0:
-                message = "Successful connection to profile " + profile
-            else: 
-                message = "Connection to " + profile + " failed. It has been deleted. Please try again"
-                Comms.send_out("GONW","none")
-                x = wait_for_msg()              
-        else:
-            message = "The password is less than 8 characters. Try a longer password"
-                
+        Comms.send_out("ADSL", (profile, password))
+        result = wait_for_msg()
+        if result == 0:
+            return templates.TemplateResponse("add_network_result.html", {
+                "request": request,
+                "message": f"Connection attempt to {profile} has started.",
+                "success": True,
+            })
+        message = f"Could not prepare the connection to {profile}. Check the password and try again."
+
     return templates.TemplateResponse("add_network_pw.html", {
         "request": request,
         "message": message,
@@ -427,21 +382,6 @@ def start_nw():
     if rec != None:
         print("NW Activated")
         
-def do_scan():
-    """Run wifi scan in background using Comms + wait_for_msg."""
-    global scan_result, scan_running, myssids_in_scan
-    scan_running = True
-    try:
-        Comms.send_out("SCAN", wifi_dev)
-        s = wait_for_msg() or []
-        Comms.send_out("WISS","none")
-        w = wait_for_msg() or []
-        scan_result = list(set(s) - set(w))
-        myssids_in_scan = list(set(s) & set(w))
-    finally:
-        scan_running = False
-        #print("Do Scan:",scan_result)
-
 def wait_for_msg():
     t = time.time()
     while time.time() - t < 40: #check for messages up to 15 seconds

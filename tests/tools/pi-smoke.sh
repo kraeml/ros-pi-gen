@@ -6,14 +6,21 @@
 #   ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
 #
 # Output: Markdown mit Protokoll-IDs (Q1–Q9, Extras) + Beobachtungs-Hilfen
-# fuer die Gruppen A/B/D. Exit-Code 0 = alle harten Q-Checks bestanden.
+# fuer die Gruppen A/B/D. Exit-Code 1 = FAIL; root-only checks are SKIPped.
 
 set -u
 
-PASS=0; FAIL=0; FAILED_IDS=()
+PASS=0; FAIL=0; SKIP=0; FAILED_IDS=(); SKIPPED_IDS=()
 
 note() { printf '%s\n' "$*"; }
 hr()   { printf '\n## %s\n' "$1"; }
+
+skip_check() {
+  local id="$1" desc="$2" command="$3"
+  SKIP=$((SKIP + 1)); SKIPPED_IDS+=("$id")
+  note "| $id | SKIP | $desc (Root-Rechte erforderlich) |"
+  note "> Manuell als root ausführen: \`$command\`"
+}
 
 check() {
   # check <ID> <Beschreibung> <Befehl...>  (harter Check, zaehlt PASS/FAIL)
@@ -72,19 +79,33 @@ else
   check_state "Q5-conf" "/etc/accesspopup.conf vorhanden" "false" "^true$"
 fi
 
-# Q6: nft-Syntax am echten Kernel
-check "Q6" "nft -c accesspopup.rules (Syntax am bcm-Kernel)" \
-  nft -c -f /etc/nftables.d/accesspopup.rules
+# Q6: nft cache initialization requires CAP_NET_ADMIN; skip cleanly when unprivileged
+if [ -x /usr/sbin/nft ]; then
+  if [ "$(id -u)" -eq 0 ]; then
+    check "Q6" "nft -c accesspopup.rules (Syntax am bcm-Kernel)" \
+      /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules
+  else
+    skip_check "Q6" "nft -c accesspopup.rules (Syntax am bcm-Kernel)" \
+      "sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules"
+  fi
+else
+  check_state "Q6" "nft vorhanden" "fehlend" "^present$"
+fi
 
 # Q7: Dispatcher-Rechte
 ST="$(stat -c '%a %u %g' /etc/NetworkManager/dispatcher.d/90-accesspopup-portal 2>/dev/null || echo 'missing')"
 check_state "Q7" "Dispatcher 755 root:root" "$ST" "^755 0 0$"
 
-# Q8: sudoers
-if command -v visudo >/dev/null 2>&1; then
-  VIS_OUT="$(visudo -cf /etc/sudoers.d/acpu 2>&1)"; VIS_RC=$?
-  check_state "Q8" "visudo sudoers.d/acpu parsed OK" \
-    "$([ $VIS_RC -eq 0 ] && echo ok || echo "$VIS_OUT")" "^ok$"
+# Q8: sudoers file is root-readable only
+if [ -x /usr/sbin/visudo ]; then
+  if [ "$(id -u)" -eq 0 ]; then
+    VIS_OUT="$(/usr/sbin/visudo -cf /etc/sudoers.d/acpu 2>&1)"; VIS_RC=$?
+    check_state "Q8" "visudo sudoers.d/acpu parsed OK" \
+      "$([ $VIS_RC -eq 0 ] && echo ok || echo "$VIS_OUT")" "^ok$"
+  else
+    skip_check "Q8" "visudo sudoers.d/acpu parsed OK" \
+      "sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu"
+  fi
 else
   check_state "Q8" "visudo vorhanden" "fehlend" "^ok$"
 fi
@@ -120,7 +141,7 @@ note "* AP-Profil-SSID (A2/B2: <hostname>-AP?): \`${AP_SSID:-(kein Profil)}\`"
 note "* Port 8052 (A5/D6: Portal nur im AP-Fenster?):"
 ss -tlnp 2>/dev/null | grep ':8052' | sed 's/^/  * /' || note "  * 8052 nicht offen"
 note "* nft-Regeln (D5: Tabellen nur waehrend AP?):"
-if nft list ruleset 2>/dev/null | grep -q 'table ip accesspopup'; then
+if [ -x /usr/sbin/nft ] && /usr/sbin/nft list ruleset 2>/dev/null | grep -q 'table ip accesspopup'; then
   note "  * \`ip accesspopup\` geladen (AP aktiv)"
 else
   note "  * keine accesspopup-Tabelle (AP inaktiv)"
@@ -132,10 +153,13 @@ note "* Letzte AccessPopup-Journalzeilen:"
 journalctl -u AccessPopup.service -n 8 --no-pager -o short 2>/dev/null | sed 's/^/  * /'
 
 hr "Ergebnis"
-note "PASS: $PASS · FAIL: $FAIL"
+note "PASS: $PASS · FAIL: $FAIL · SKIP: $SKIP"
 if [ "$FAIL" -gt 0 ]; then
   note "Fehlgeschlagen: ${FAILED_IDS[*]}"
   note "Detaillog ggf. mit: journalctl -b · systemctl --failed · nft list ruleset"
   exit 1
+fi
+if [ "$SKIP" -gt 0 ]; then
+  note "Nicht geprüft: ${SKIPPED_IDS[*]} (Privilegienhinweise oben beachten)"
 fi
 exit 0

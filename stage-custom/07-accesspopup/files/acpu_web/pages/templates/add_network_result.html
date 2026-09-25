@@ -1,0 +1,8 @@
+{% extends 'core.html' %}
+{% block core_body%}
+<div class="area">
+<h2>WiFi setup submitted</h2>
+<p>{{ message }}</p>
+<p>The Pi will try to join in a few seconds. The AP fallback timer resumes after the connection attempt. Reconnect this device to the configured WiFi network if the Pi joins successfully; otherwise the AP will be restored.</p>
+</div>
+{% endblock core_body%}

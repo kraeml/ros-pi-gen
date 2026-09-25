@@ -84,7 +84,7 @@ Der Roboter bleibt **ohne konfiguriertes WLAN erreichbar**. Genauer:
 - hostapd-Systemdienst kollidiert mit NM-AP-Modus, wenn er enabled ist
   (dnsmasq als Dienst analog; `dnsmasq-base` als Bibliothekspaket ist ok)
 - Beim AP→WLAN-Wechsel (und zurück) brechen SSH/VNC-Verbindungen ab
-- Scan während aktivem AP ist je nach Chip nicht möglich (→ manueller SSID-Fallback)
+- Scan während aktivem AP ist je nach Chip nicht möglich; die Web-UI nutzt deshalb manuelle SSID-Eingabe als Standard und scannt nicht
 
 ---
 
@@ -172,7 +172,7 @@ Konfig) → Test-Checkliste (QEMU + Real-Hardware) → Risikoliste.
 
 ## 8. Umsetzungsplan v2.1 (umgesetzt 2026-09)
 
-Umsetzung: `stage2/07-accesspopup/` (`00-packages`, `01-run.sh`, `files/`
+Umsetzung: `stage-custom/07-accesspopup/` (`00-packages`, `01-run.sh`, `files/`
 inkl. `VENDORED.md`), `config` (`WPA_COUNTRY`-Fallback), README-Abschnitt
 „AccessPopup – WLAN-AP-Fallback mit Web-UI", Nutzeranleitung
 [WLAN-Anleitung.md](WLAN-Anleitung.md), Abnahmetests
@@ -186,12 +186,12 @@ Ergebnis der Planprüfung und Entscheidungen; supersedes die Empfehlungen aus §
 
 | Punkt | Entscheidung |
 |---|---|
-| Basis | AccessPopup **unverändert**, vendor't + gepinnt (Commit `ba6eff1…`, siehe `stage2/07-accesspopup/files/VENDORED.md`), GPL-3.0-Lizenz mitgeliefert |
+| Basis | AccessPopup **unverändert**, vendor't + gepinnt (Commit `ba6eff1…`, siehe `stage-custom/07-accesspopup/files/VENDORED.md`), GPL-3.0-Lizenz mitgeliefert |
 | Konfig-Frontend | **AccessPopup-Web-UI nutzen** (Port 8052) – kein eigenes Portal-App-Entwickeln; Web-Units werden **nicht** enable'd, sondern vom NM-Dispatcher **nur im AP-Fenster** gestartet (keine Exposition auf Schul-/Heim-LAN) |
 | Captive-Portal-Effekt | ohne eigene HTTP-App: DNS-Wildcard (`/etc/NetworkManager/dnsmasq-shared.d` → `address=/#/192.168.50.5`) + nft-Redirect `tcp/80 → :8052` auf wlan0; HTTP-Proben der Clients landen direkt in der Web-UI |
 | AP-Defaults | SSID `<hostname>-AP` (Hostname = Geräteidentität via Pi-Imager – **keine Etiketten, MAC nicht ablesbar**; Fallback `Roboter-AP`), Passwort `Pi-WLAN-Setup-2026` (einheitlich bekannt, aufs Kursmaterial), IP `192.168.50.5` |
 | Regulierungsdomäne | `export WPA_COUNTRY="${WPA_COUNTRY:-DE}"` in der config – DE nur Build-Fallback, Imager-Wert bleibt zur Laufzeit maßgeblich |
-| Sub-Stage | `stage2/07-accesspopup/` mit pi-gen-Konvention `00-packages` + `01-run.sh` + `files/` |
+| Sub-Stage | `stage-custom/07-accesspopup/` mit pi-gen-Konvention `00-packages` + `01-run.sh` + `files/` |
 
 ### 8.2 Architektur
 
@@ -250,5 +250,5 @@ NM-Start, AP, Scan, Skriptlauf, Web-Units-enable.
 - Uniformes bekanntes AP-Passwort + auth-lose Web-UI: nur im AP-Fenster exponiert (Dispatcher-Gating); für Dauereinsatz Passwort ändern
 - First Boot: SSID ggf. kurz `raspberrypi-AP` bis cloud-init den Imager-Hostnamen setzt → `hostname`-Dispatcher-Event korrigiert nach (Testen)
 - Wechsel AP↔WLAN bricht SSH/VNC ab; Web-UI-Seite timeoutet beim Speichern absichtlich (Client muss ins neue WLAN wechseln)
-- Scan während aktivem AP je nach Chip unmöglich → Web-UI bietet manuelle SSID-Eingabe
+- Scan während aktivem AP je nach Chip unmöglich → Web-UI nutzt manuelle SSID-Eingabe als Standard und ruft den Scan nicht auf
 - Admin-Weg im laufenden WLAN: `sudo accesspopup -a` (Dauer-AP) → Web-UI erscheint im AP-Fenster; zurück mit `sudo accesspopup`

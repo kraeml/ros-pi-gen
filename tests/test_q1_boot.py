@@ -26,7 +26,12 @@ from helpers import container
 
 
 def _is_system_running(name: str) -> str:
-    res = container.exec_cmd(name, ["systemctl", "is-system-running"], timeout=60)
+    # Exec-Timeouts sind unter qemu-Emulation normal (Boot-Last) — kein
+    # Abbruch, weiterpollen bis BOOT_TIMEOUT (Signature 'haengend').
+    try:
+        res = container.exec_cmd(name, ["systemctl", "is-system-running"], timeout=120)
+    except container.DockerError:
+        return "exec-haengend"
     return res.stdout.strip()
 
 
@@ -35,6 +40,10 @@ def test_q1a_container_boot(container_tag):
     container.remove_container(name)
     try:
         container.start_systemd(container_tag, name)
+        # Poll: 5-s-Intervall, BOOT_TIMEOUT 900 s (conftest) → bis zu 180
+        # Zyklen; empirisch erreicht systemd unter qemu 8.x running/degraded
+        # in ~1–3 min — das Signal ist ein Grobzustand, kein Timing-Messwert,
+        # daher ist grobe Granularität ausreichend (kein per-Zyklus-Output).
         state, deadline = "", time.monotonic() + BOOT_TIMEOUT
         while time.monotonic() < deadline:
             state = _is_system_running(name)
@@ -43,7 +52,8 @@ def test_q1a_container_boot(container_tag):
             time.sleep(5)
         assert state in ("running", "degraded"), (
             f"systemd-Boot nicht abgeschlossen nach {BOOT_TIMEOUT}s "
-            f"(letzter Zustand: {state!r})."
+            f"(letzter Zustand: {state!r}).\n"
+            "Container-Log (Tail):\n" + container.logs(name)[-2000:]
         )
         res = container.exec_cmd(name, ["true"])
         assert res.rc == 0, res.summary()

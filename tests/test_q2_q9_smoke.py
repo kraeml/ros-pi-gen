@@ -69,6 +69,9 @@ def test_q5_accesspopup_conf(pack):
     assert re.search(r"^ap_ssid=", conf, re.MULTILINE), (
         f"ap_ssid-Platzhalter fehlt in {CONF_PATH}:\n{conf}"
     )
+    accesspopup = imageio.debugfs_cat(pack.root_img, "/usr/local/bin/accesspopup")
+    assert 'ipv4.addresses "$ap_ip"' in accesspopup
+    assert 'ipv4.addr "$ap_ip"' not in accesspopup
 
 
 def test_q6_nft_syntax(crun, pack):

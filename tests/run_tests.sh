@@ -13,4 +13,18 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 
 "$VENV/bin/python" -m pip install -q -r "$SCRIPT_DIR/requirements.txt"
-exec "$VENV/bin/python" -m pytest "$SCRIPT_DIR" "$@"
+
+# --clean-cache abziehen (pytest kennt das Flag nicht): setzt intern
+# PIGEN_TEST_CLEAN=1 (conftest pytest_configure leert dann tests/.work).
+clean=0
+args=()
+for a in "$@"; do
+	if [ "$a" = "--clean-cache" ]; then
+		clean=1
+	else
+		args+=("$a")
+	fi
+done
+[ "$clean" -eq 1 ] && export PIGEN_TEST_CLEAN=1
+
+exec "$VENV/bin/python" -m pytest "$SCRIPT_DIR" "${args[@]}"

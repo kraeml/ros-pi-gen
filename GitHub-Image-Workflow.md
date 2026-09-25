@@ -3,9 +3,12 @@
 > **Zweck dieses Dokuments:** Umsetzungsplan für einen automatisierten
 > GitHub-Actions-Workflow, der das Roboter-Image baut, testet und als
 > **Raspberry-Pi-Imager-2.0-Paket** (Image + Repository-JSON) bereitstellt.
-> **Nicht umgesetzt** — dieser Entwurf wird erst nach Freigabe als
-> `.github/workflows/image-build.yml` + Makefile/Skripte angelegt. Der Lauf
-> muss **identisch lokal** startbar sein (Thin-Wrapper-Prinzip, § 2).
+> **Grundlage teils umgesetzt (Feature `stage-custom-build`):** das
+> Thin-Wrapper-Makefile existiert (`venv lint setup build test ci`,
+> siehe § 2) und der stage-custom-Modus ist gebaut (TODO Block 1, Idee b) —
+> **offen** bleibt der eigentliche Workflow `.github/workflows/image-build.yml`
+> sowie `make package`/Imager-JSON (§ 5). Der Lauf muss **identisch lokal**
+> startbar sein (Thin-Wrapper-Prinzip, § 2).
 >
 > Geprüfter Stand: 22. September 2026. Remote:
 > `github.com/kraeml/ros-pi-gen` (Branch `develop`), noch kein
@@ -38,7 +41,9 @@ Betrieb.
 ## 2. Thin-Wrapper-Prinzip (Voraussetzung für „läuft auch lokal")
 
 Die gesamte Logik lebt in **versionierten Makefile-Targets/Skripten im
-Repo**; der Workflow ruft ausschließlich diese auf:
+Repo**; der Workflow ruft ausschließlich diese auf. **Stand: Makefile im
+Repo-Root umgesetzt** (Targets `venv`, `lint`, `setup`, `build`, `test`,
+`ci`; `package` offen):
 
 ```text
 GitHub-Runner                                   Lokal
@@ -48,7 +53,7 @@ make lint    → Overlay-/Shell-Checks            make lint
 make setup   → pi-gen-Setup (2 Modi, s. u.)     make setup [MODE=…]
 make build   → build-docker.sh (Docker/QEMU)    make build
 make test    → tests/run_tests.sh               make test
-make package → Imager-JSON + Prüfsummen + bmap  make package
+make package → Imager-JSON + Prüfsummen + bmap  make package (offen)
 make ci      → alles nacheinander               make ci
 ```
 
@@ -59,19 +64,20 @@ Make-Aufrufe, Upload). Optionale Paritätsprüfung mit
 nötig für binfmt/Docker, Diskgröße, kein Release-Upload): nur für Stufe A/B
 rausgefilterte Runs sinnvoll, nicht als Pfad.
 
-**`make setup` — zwei Modi (Dual-Track, Beschluss 2026-09-22):**
+**`make setup` — zwei Modi (Dual-Track, Beschluss 2026-09-22; beide
+umgesetzt im Makefile):**
 
-- **Phase 1 · `MODE=overlay` (Start):** pi-gen-Clone @ gepinntem Commit
-  `74d08a3` (arm64-Branch) + Overlay-cp in README-Reihenfolge
-  ([README](README.md#overlay-einbringen-beide-wege)) — gleiche Mechanik wie
-  TODO Block 1, Idee a (`setup.sh`). Bewährt und heute lauffähig; die
+- **Phase 1 · `MODE=overlay` (Legacy-Fallback):** pi-gen-Clone @ gepinntem
+  Commit `74d08a3` (arm64-Branch) + Overlay-cp — gleiche Mechanik wie
+  TODO Block 1, Idee a (`setup.sh`). Die
   Ephemeralität der CI-Umgebung entschärft das dirty-Tree-Problem (der
   Clone wird pro Lauf frisch geklont), **nicht** aber die gerichteten
   cp-Fallen (`00-packages.desktop` überschreibt die headless-Liste,
   `PIGEN_VARIANT`-Kopplung — siehe README-Warnungen).
-- **Phase 2 · `MODE=stage-custom` (Ziel):** pi-gen bleibt **pristine**
-  (Submodul), ros-pi-gen hält ein eigenes Stage-Dir und die `config` zeigt
-  per `STAGE_LIST` extern darauf — **kein Kopieren** (TODO Block 1, Idee b).
+- **Phase 2 · `MODE=stage-custom` (Ziel — umgesetzt, Default):** pi-gen
+  bleibt **pristine** (Submodul), ros-pi-gen hält ein eigenes Stage-Dir
+  und die `config` zeigt per `STAGE_LIST` extern darauf — **kein
+  Kopieren** (TODO Block 1, Idee b).
   Mechanik gegen pi-gen `74d08a3` verifiziert (2026-09-22, lokale Quelle):
   - `build.sh:330-331` `realpath`'t **jeden** `STAGE_LIST`-Eintrag
     unabhängig — externe Pfade (absolut oder relativ zum cwd des Aufrufs)
@@ -95,8 +101,12 @@ rausgefilterte Runs sinnvoll, nicht als Pfad.
     [Pi-Gen-Tool.md](Pi-Gen-Tool.md).
 
 Beide Modi teilen sich `build`/`test`/`package` — der Umschalter ist nur
-`setup` (und bei Phase 2 zusätzlich die Volume-Übergabe an `PIGEN_DOCKER_OPTS`
-in `build`).
+`setup` (bei Phase 2 übergibt `build` zusätzlich die Volume-Mounts an
+`PIGEN_DOCKER_OPTS`). **Umsetzungsabweichung zum Entwurf:** der
+Varianten-Umschalter ist nicht mehr `PIGEN_VARIANT` in der config, sondern
+die Sub-Stage-Auswahl in `stage-custom` (`06-variant-headless` vs.
+`06-variant-desktop`, SKIP-Dateien gesetzt vom Makefile; `VARIANT=`-Input
+des Workflows geht direkt an `make build/setup`).
 
 ## 3. Pipeline
 
@@ -110,10 +120,10 @@ in `build`).
 
 **Stufen:**
 
-- **A · Lint/Overlay** — `tests/run_tests.sh tests/test_overlay_files.py
-  tests/test_hostname_ssid.py` (laufen ohne Docker/Image, siehe
-  [tests/README.md](tests/README.md)); zusätzlich Shellcheck über
-  `stage2/`/`config` (Syntax-Gate für den Build-Job).
+- **A · Lint/Overlay** — `make lint` (= shellcheck über
+  `stage-custom/` + Overlay-Tests `test_overlay_files`/
+  `test_hostname_ssid`, laufen ohne Docker/Image, siehe
+  [tests/README.md](tests/README.md)).
 - **B · Build** — auf `ubuntu-latest`:
   1. Disk-Cleanup (**Pflicht**, Runner hat nur ~14 GB frei, Build braucht
      work 3,1 GB + root.img + xz + Docker-Schichten): bekannte Räum-Kandidaten
@@ -125,15 +135,14 @@ in `build`).
      registriert qemu-aarch64 teils selbst im Container — README —, aber
      explizit ist reproduzierbarer).
   3. `make setup && make build` (`IMG_DATE=<Tag-Datum>` via Env —
-      `IMG_SUFFIX` **nicht** per Env: das `-lite` setzt pi-gens
-      `stage2/EXPORT_IMAGE` automatisch und überschreibt ein Env-IMG_SUFFIX
-      beim Export, build.sh:337; siehe
-      [Pi-Gen-Tool.md](Pi-Gen-Tool.md), Projekt-Anmerkung). Baureihe
-      nach Beschluss: **Phase 1 mit `MODE=overlay`** (heute lauffähig;
-      CI klont frisch, dirty-Tree egal), **Phase 2 wechselt auf
-      `MODE=stage-custom`** sobald das externe Stage-Dir steht (Idee b) —
-      dann entfallen die gerichteten-cp-Fallen auch in CI; der Umschalter
-      ist ein Workflow-Input, Stufen C/D sind modus-unabhängig.
+      `IMG_SUFFIX` **nicht** per Env: das `-lite` setzt
+      `stage-custom/EXPORT_IMAGE` automatisch und überschreibt ein
+      Env-IMG_SUFFIX beim Export, build.sh:337; siehe
+      [Pi-Gen-Tool.md](Pi-Gen-Tool.md), Projekt-Anmerkung).
+      **Umsetzung:** Phase 2 ist gebaut — CI läuft direkt mit dem Default
+      `MODE=stage-custom` (pi-gen-Submodul bleibt pristine, keine
+      gerichteten-cp-Fallen); `MODE=overlay` bleibt als Workflow-Input
+      verfügbar (Fallback), Stufen C/D sind modus-unabhängig.
   4. Upload: `.img.xz`, `build-docker.log`, später JSON (Artefakt
      `image-artifacts`, Retention 7 Tage; bei Build-Fehler zusätzlich
      `work/`-Logzip, Retention 1 Tag — der 3,1-GB-work-Ordner ist zu groß
@@ -281,9 +290,11 @@ Generiertes `imager-repository.json` (V4-Sublist-Format, **ohne**
 
 ## 8. Offene Punkte
 
-- [ ] `make`-Zielnamen und Skript-Lagerort final (Makefile im Root vs.
-      `tools/`-Skripte; `setup`-Dual-Track: MODE-Interface und Umschalttermin
-      Phase 1 → Phase 2 festlegen — Schnittstelle zu TODO Block 1, Idee b)
+- [x] `make`-Zielnamen und Skript-Lagerort final — **Makefile im Root**
+      (Targets `venv lint setup build test ci`, `package` folgt mit der
+      Imager-Paketierung); MODE-Interface umgesetzt (`MODE=stage-custom`
+      Default, `MODE=overlay` Fallback) — Feature `stage-custom-build`,
+      TODO Block 1 Idee b
 - [ ] Exakte `devices`-Tags gegen das offizielle
       `os_list_imagingutility_v4.json` verifizieren (pi3+/pi4/pi5 —
       Tag-Syntax nicht aus Schema-Doku ableitbar)
@@ -322,6 +333,17 @@ scripts/common:34), `EXPORT_CONFIG_DIR` extern-fähig (Zeile 323),
 bindet die config bereits extern ein (`--volume …:/config:ro`,
 `-c /config`-Rewrite, Zeilen 83, 103); Mount-Pflicht folgt aus
 `Dockerfile` (`COPY . /pi-gen/`).
+
+**Umgesetzt (Feature `stage-custom-build`, 22.09.2026):** pi-gen als
+Submodul @ `74d08a3` (in upstream arm64 exakt der HEAD); Verkettung als
+**anhängende Stage** gewählt — `STAGE_LIST="stage0 stage1 stage2
+stage-custom"`, pi-gens stage2 läuft vollständig (01–04), exportiert aber
+nicht (`stage2/SKIP_IMAGES`, gitignored, von `make setup` gesetzt);
+`stage-custom` hält `prerun.sh` (copy_previous) + `EXPORT_IMAGE` + die
+eigenen Sub-Stages 05–07. Varianten als parallele Sub-Stages
+(`06-variant-headless`/`06-variant-desktop`, SKIP-Toggle statt gerichteter
+cp). Makefile im Root als Thin-Wrapper; Tests/Q0 auf die neuen Pfade
+umgestellt (Q0f varianten-tolerant).
 
 Offen/unverifiziert: exakte GitHub-Runner-Disk-Werte (Näherung aus
 Allgemeinwissen, im ersten Lauf kalibrieren), `devices`-Tag-Syntax der

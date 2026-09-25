@@ -15,11 +15,22 @@ python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
 
 ./run_tests.sh                    # Build-Host-Ebene: Q0 + Q1a + Q2–Q9 + Manifest
 ./run_tests.sh -k q5              # einzelner Test
-./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vorher leeren
+./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vor dem Lauf löschen
 
-# Hardware-Lauf (Gruppe Q final am echten Pi, read-only):
+# Hardware-Lauf (Gruppe Q final am echten Pi, read-only; Q6/Q8 zeigen als pi SKIP):
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
+
+# Einzelne privilegierte Checks mit sudo (TTY fuer Passwortprompt):
+ssh -t pi@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
+ssh -t pi@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
+
+# Oder vollständiger Smoke-Test unter root:
+ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
 ```
+
+Komfortabler via Makefile im Repo-Root: `make venv`, `make test`
+(durchgereicht an diese Suite) — siehe
+[README](../README.md#build-mit-make-empfohlener-weg).
 
 `run_tests.sh` findet die venv automatisch unter `ros-pi-gen/.venv`
 (überschreibbar mit `PIGEN_TEST_VENV`), installiert `requirements.txt`
@@ -30,16 +41,19 @@ idempotent darin und ruft pytest auf. Alternativ direkt:
 
 | Werkzeug | Wofür |
 |---|---|
-| Docker Engine + arm64-binfmt | Container-Tests (Q1a, Q2–Q9, hostname-SSID) — `docker run --platform linux/arm64 debian:trixie true` muss gehen |
+| Docker Engine + arm64-Emulation | Container-Tests (Q1a, Q2–Q9, hostname-SSID) — `docker run --platform linux/arm64 debian:trixie true` muss gehen; die Suite setzt den nötigen OFD-tauglichen Container-qemu-Entry **selbst** (Sessionstart, `tools/binfmt.sh setup` — gleicher Version-Gate-Mechanismus wie beim Build; auf Host-qemu ≥ 6 (MIN_MAJOR) No-op; Opt-out `PIGEN_TEST_NO_BINFMT=1`). Hintergrund: nach `make build` ist der Build-Entry entfernt und Host-qemu 4.x wedged systemd beim Q1a-Container-Boot (fcntl-OFD → EINVAL) |
 | `7z`, `debugfs` (e2fsprogs) | Boot-Partition entpacken, ext4 lesen (ohne Root) |
 | nftables-Hilfscontainer | Q6 (wird einmalig gebaut, dann gecached) |
 
-**Platzbedarf:** Cache unter `tests/.work/` (~10 GB: entpacktes Image,
-Partitions-Slices, RootFS-Staging). `PIGEN_TEST_CACHE` überschreibbar;
-`PIGEN_TEST_CLEAN=1` löscht vor dem Lauf. Kein sudo nötig.
+**Platzbedarf:** Cache unter `tests/.work/` (8–12 GB je nach Image-/
+Variantenumfang: entpacktes Image, Partitions-Slices, RootFS-Staging).
+`PIGEN_TEST_CACHE` überschreibbar; `PIGEN_TEST_CLEAN=1` löscht vor dem
+Lauf — `--clean-cache` (Schnellstart) setzt intern dieselbe Variable.
+Kein sudo nötig.
 
 **Image-Auswahl:** automatisch die neueste `image_*.img[.xz]` in
-`pi-gen/deploy/` (Fallback `ros-pi-gen/deploy/`), überschreibbar mit
+`ros-pi-gen/deploy/` (Docker-Build via `make build`) bzw.
+`ros-pi-gen/pi-gen/deploy/` (nativer/manueller Lauf), überschreibbar mit
 `PIGEN_TEST_IMAGE=/pfad/zum/image.img.xz`.
 
 ## Testkatalog (Build-Host-Ebene)
@@ -47,7 +61,7 @@ Partitions-Slices, RootFS-Staging). `PIGEN_TEST_CACHE` überschreibbar;
 | Test | Protokoll | Prüft | Methode |
 |---|---|---|---|
 | `test_q0a–d` | – | Image vorhanden, pi-gen-Commit gepinnt (`74d08a3`), `07-accesspopup/01-run.sh` gelaufen (nicht geskippt), Log vollständig & zum Image passend | Build-Log + `.info` |
-| `test_q0e–g` | – | Build-Log: jedes `Begin` hat `End`, **kein `Skip`**, Pflichtstufen komplett (stage0–2 inkl. 05/06/07 + export-image), `Setting up docker-ce/ansible` + visudo-Beleg | Build-Log |
+| `test_q0e–g` | – | Build-Log: jedes `Begin` hat `End`, **kein `Skip`**, Pflichtstufen komplett (stage0–2 inkl. 05/06/07 + export-image), docker-ce/ansible-Installation belegbar (`Setting up …` bei Erstinstallation, `… is already the newest version` bei Wiederholungslauf mit persistiertem `work/`) + visudo-Beleg | Build-Log |
 | `test_q1a` | Q1 | systemd-Boot des RootFS im arm64-Container: `running`/`degraded` + exec-Zugang | Docker, privilegiert |
 | `test_image_files[*]` | – | Datei-Manifest: Overlay-Dateien im RootFS + Boot-Partition, Docker/Ansible-Binaries, Inhalts-Marker (`ap_pw`, `table ip accesspopup`, Redirect 8052, …) | debugfs |
 | `test_q2` | Q2 | `AccessPopup.timer` = `enabled` | Container |
@@ -59,8 +73,35 @@ Partitions-Slices, RootFS-Staging). `PIGEN_TEST_CACHE` überschreibbar;
 | `test_q8` | Q8 | `visudo -cf /etc/sudoers.d/acpu` + Beleg im Build-Log | Container + Build-Log |
 | `test_q9` | Q9 | `NetworkManager-dispatcher` vorhanden/aktivierbar | Container |
 | `test_overlay_*` | – | Overlay-Dateien: Exec-Bits, `00-packages` je Stage, AccessPopup-Dateisatz | Repo-Dateien |
-| `test_hostname_ssid[*]` | §8.6 | `hostname-ssid.sh`-Logik: `<hostname>-AP`, Umlaute, Kürzung, Fallback, idempotent | Docker (stub-hostname) |
+| `test_hostname_ssid[*]` | §8.6 | `hostname-ssid.sh`-Logik: `<hostname>-AP`, Umlaute, Kürzung, Fallback, idempotent; **Hostnamenwechsel** (Dispatcher-Fall: SSID folgt neuem Hostnamen statt bestehendem `ap_ssid`) | Docker (stub-hostname) |
 | `test_extras_*` | TODO Block 3 | docker-ce/ansible installiert, docker.service enabled, cloud-init ok | Container |
+
+## Architektur (Build-Host-Ebene)
+
+Session-scoped Fixture-Kette (tests/conftest.py) — die Suite **baut kein
+Image**, sie setzt `make build` voraus:
+
+1. `discover_image` — neuestes `image_*.img[.xz]` aus `deploy/` bzw.
+   `pi-gen/deploy/` (überschreibbar `PIGEN_TEST_IMAGE`); ohne Fund → Skip.
+2. `prepare` — Image entpacken, Partition-Slices in den Cache
+   (`tests/.work`); daraus liest `debugfs` root_img/boot.
+3. `find_build_log` — komplette `build-docker.log`/`build.log` neben der
+   Image-Quelle (pro Build einmaliges Artefakt, keine Rotation).
+4. `stage_rootfs` → `docker import` — RootFS-Staging-Kopie einmal pro
+   Session als arm64-Image importieren (Owner via `--owner=0` normalisiert,
+   Tag aus Pfad-Digest).
+5. `crun` — pro Aufruf ein frischer `docker run --rm --platform linux/arm64`
+   gegen dieses importierte Image (kein Zustand zwischen Befehlen).
+
+Container-Modell: **Q1a** startet einen laufenden systemd-Container
+(`docker run -d --privileged`, am Testende aufgeräumt); **Q2–Q9** spawnen
+Wegwerf-Container je Befehl vom selben RootFS (`is-enabled`/`visudo` lesen
+Unit-Dateien — kein gebootetes System nötig); **Q6** nutzt ein separates
+amd64-Hilfsimage mit `--network host`.
+
+Q2–Q9 hängen **nicht** von Q1 ab (kein Test-Ordering/Dependency):
+`BOOT_TIMEOUT` wirkt nur auf die Q1a-Poll-Schleife; bei Q1-Fail laufen
+Q2–Q9 eigenständig weiter.
 
 ## Hardware-Läufe (Gruppe Q final am Pi)
 
@@ -69,13 +110,22 @@ hier endgültig — insbesondere **Q6 gegen den echten bcm-Kernel**:
 
 ```bash
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
+
+# Vollständiger Hardware-Smoke mit sudo/root (TTY fuer Passwortprompt):
+ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
+
+# Oder nur einzelne privilegierte Checks:
+ssh -t pi@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
+ssh -t pi@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
 ```
 
-Erzeugt eine Markdown-Tabelle (Q-IDs, PASS/FAIL), Beobachtungs-Hilfen für
-A/B/D (hostname→SSID, NM-Profile, AP-Zustand, Port 8052, nft-Tabellen,
-`accesspopup.conf` mit maskiertem Passwort, Journal-Tail) und Exit-Code 0
-nur bei bestandenen harten Q-Checks. Status-Schnellreport ohne Pass/Fail-
-Logik: `tools/pi-state.sh`.
+Erzeugt eine Markdown-Tabelle (Q-IDs, PASS/FAIL/SKIP) und Beobachtungs-Hilfen
+für A/B/D. Q6 (`nft -c`) und Q8 (`visudo` auf sudoers) benötigen root. Läuft
+der Smoke-Test als normaler Benutzer, werden diese Checks als SKIP ausgegeben
+und die nötigen `sudo`-Befehle angezeigt; alle übrigen harten Checks müssen
+bestehen. Für die vollständige Prüfung kann das ganze Skript mit root-Rechten
+laufen; alternativ nur Q6/Q8 separat mit den obigen Befehlen prüfen. Status-
+Schnellreport ohne Pass/Fail-Logik: `tools/pi-state.sh`.
 
 Empfohlener Abnahmefluss: erst `run_tests.sh` am Build-Host (spürt
 Build-/Paketierfehler vor dem Flashen), dann `pi-smoke.sh` am Gerät, dann
@@ -106,6 +156,37 @@ Versuch mit qemu ≥ 9 wertvoll):
    `Result: resources`) — deshalb bleibt Q1a bewusst auf Boot-Zustand +
    exec-Zugang beschränkt.
 
+### qemu-user-Versionen-Matrix (Q1a-Probe)
+
+Empirische Schwelle für MIN_MAJOR (binfmt.sh-Version-Gate): denselben Q1a-
+Boot unter **verschiedenen qemu-Interpretern** fahren und beobachten, ab
+welcher Version der Container-Boot grün ist (statt der 8er-Annahme).
+
+```bash
+tools/q1a-probe.sh /tmp/qprobe/qemu-<version> <label>   # je Probe ~2–5 min
+```
+
+Pro-Lauf: Probe-Binary als temporärer binfmt-Entry (F-Flag, Bind-Mount in
+den pi-gen-Container — kein Host-root nötig), Q1a mit `PIGEN_TEST_NO_BINFMT=1`
++ `PIGEN_TEST_BOOT_TIMEOUT=300` (Wedges bounden), Klassifikation
+PASS/WEDGE/FAIL(-OFD), Entry-Cleanup.
+
+| Version | Quelle | Erwartung | Ergebnis (gemessen 2026-09-24) |
+|---|---|---|---|
+| 4.2.1 | Ubuntu 20.04 (Host) | Negativkontrolle: Wedge (OFD, passwd-lock) | ❌ **WEDGE** — `exec-haengend`, kein Boot in 300 s (7:40 min Lauf) |
+| 6.2.0 | Ubuntu 22.04 (jammy) | OFD ok (≥ 5.1), Spawn-Grenze? („Warum kein QEMU“ Nr. 6) | ✅ **PASS** (1:03 min) — Spawn-Grenze greift beim Boot nicht |
+| 8.2.2 | Ubuntu 24.04 (noble) | ok (VM-Build-Beleg) | ✅ **PASS** (1:10 min) |
+| 10.0.13 | Debian trixie (pi-gen-Container) | Positivkontrolle: grün (67-passed-Lauf) | ✅ **PASS** (0:47 min) |
+
+**Empirische Schwelle: qemu 6.2 = älteste grüne Version** → `MIN_MAJOR=6`
+im Version-Gate (vorher konservativ 8). Jammy-Hosts (Build **und** Tests)
+laufen damit mit Host-qemu 6.2 ohne binfmt-Entry; nur focal (4.x) bekommt
+den Container-Entry. 5.x bleibt ungetestet (fail-safe: Gate registriert
+die Container-Entry für alle < 6).
+
+Ergebnis → MIN_MAJOR auf die älteste empirisch grüne Version setzen (oder
+8 bestätigt); Wedge-Signaturen je Version dokumentieren.
+
 `pi-smoke.sh` am echten Gerät ist der saubere Ersatz: gleiche Prüfungen,
 echter Kernel, echte Peripherie.
 
@@ -113,12 +194,30 @@ echter Kernel, echte Peripherie.
 
 - **Q1a** prüft kein echtes Kernel-Booting — der Kernel-Beleg kommt vom
   Hardware-Lauf (`pi-smoke.sh`, Q1).
+- **pi-gen-Pin (`74d08a3`, Q0b):** bewusste Stabilitätsentscheidung —
+  Updates nur per Pin-Änderung im ros-pi-gen-Repo, nie automatisch
+  (Rationale: README, Abschnitt Struktur / TODO Block 1, Pin-Update-
+  Politik).
 - **Q6** (Container) validiert Syntax/Features gegen den Host-Kernel; der
   verbindliche Lauf ist Q6 am Pi (bcm-Kernel) bzw. der Hardware-Test D5.
+  Voraussetzung: `NETLINK_NETFILTER` mit geladenen `nf_tables`/`nfnetlink`-
+  Modulen im Host-Kernel (moderne Kernel-Versionen bringen das mit; das
+  Docker-Bridge-Netns bietet den Netlink nicht — daher `--network host`).
+  Bei „Protocol not supported" skippt der Test statt zu failen.
 - **Q2–Q9** werden im Container am echten RootFS geprüft (echte `systemctl`/
   `visudo`-Binaries), Ownership via `tar --owner=0` beim Import normalisiert.
 - Q0 erwartet, dass der neueste Build-Log zum neuesten Image gehört
   (`build-docker.log`/`build.log` im selben Verzeichnis).
+- **Q8** liest den Build-Log komplett ein (`build_log_text`); die Log-Datei
+  ist ein pro Build einmaliges Artefakt neben dem Image (keine Rotation) —
+  Kürzung/Verlust würde auch Q0a–d treffen, Risiko damit theoretisch.
+- **Q1a-Fail-Output:** Container-Log-Tail (2000 Zeichen) geht in die
+  pytest-Ausgabe; vollständige Container-Logs als CI-Artefakt speichern
+  = Aufgabe des Workflows (siehe GitHub-Image-Workflow.md, Upload-Schritt).
+- **extras/cloud-init** prüft bewusst nur „nicht failed" (Oneshot-Service,
+  nach Boot typ. inactive) — als spätere Verfeinerung böte
+  `cloud-init status` ein präziseres Signal (done/running/error/degraded,
+  meldet auch interne Fehler trotz „erfolgreich beendet").
 - Hardware-Gruppen A–D (AP-Verhalten, Captive Portal, Isolation, Mehrgeräte)
   bleiben manuell — die Automatisierung liefert nur Beobachtungen.
 
@@ -126,18 +225,23 @@ echter Kernel, echte Peripherie.
 
 | Variable | Default | Wirkung |
 |---|---|---|
-| `PIGEN_TEST_IMAGE` | auto (neuestes in `pi-gen/deploy`) | explizites Image |
+| `PIGEN_TEST_IMAGE` | auto (neuestes in `deploy/` bzw. `pi-gen/deploy/`) | explizites Image |
 | `PIGEN_TEST_CACHE` | `tests/.work` | Cache-Verzeichnis |
-| `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen |
+| `PIGEN_TEST_CLEAN` | – | `1` = Cache vor dem Lauf löschen (`--clean-cache` setzt intern diese Variable). Nicht parallel-sicher (pytest-xdist): wirkt prozessübergreifend |
 | `PIGEN_TEST_BOOT_TIMEOUT` | `900` | Q1a: Sekunden bis systemd-Zustand |
 | `PIGEN_TEST_DOCKER_TIMEOUT` | `300` | Timeout je Container-Kommando |
+| `PIGEN_TEST_NO_BINFMT` | – | `1` = Container-qemu-Entry nicht selbst setzen/räumen (wenn der Host binfmt anderweitig managed) |
 | `PIGEN_TEST_VENV` | `ros-pi-gen/.venv` | venv für run_tests.sh |
 
 ## Wartung
 
 - **Manifest ergänzen:** `test_image_files.py` — Liste `ROOTFS_MANIFEST` /
   `BOOT_MANIFEST` (eine Zeile pro Datei oder Inhalts-Marker).
+- **Neue Dateien in `stage-custom/07-accesspopup/files/`:** zwei Stellen —
+  Liste in `test_overlay_files.py::test_overlay_accesspopup_files_komplett`
+  (Overlay-Ebene) und ggf. `ROOTFS_MANIFEST` in `test_image_files.py`
+  (Image-Ebene).
 - **Pflichtstufen ergänzen:** `REQUIRED_SUBSTAGES` in `test_q0_image_stand.py`.
-- Änderungen an `stage2/**` → Overlay-Guard sofort, Image-Tests nach Rebuild.
+- Änderungen an `stage-custom/**` → Overlay-Guard sofort, Image-Tests nach Rebuild.
 - Neue Protokollzeilen in Gruppe Q → Testfunktion mit passender ID
   (`test_q<N>_*`) bzw. Abschnitt in `pi-smoke.sh`.

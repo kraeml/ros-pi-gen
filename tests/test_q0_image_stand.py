@@ -17,6 +17,9 @@ def test_q0a_image_vorhanden(image_path):
 
 
 def test_q0b_pigen_commit_gepinnt(pack):
+    # startswith statt Gleichheit: akzeptiert Kurz- (7-stellig) wie Vollhash
+    # des gepinnten Commits; Kollisionsrisiko im Kurzformat ist bei einem
+    # stabilen Upstream-Commit praktisch ausgeschlossen.
     info = pack.source.parent / (
         pack.source.name.removeprefix("image_").rsplit(".img", 1)[0] + ".info"
     )
@@ -31,35 +34,51 @@ def test_q0b_pigen_commit_gepinnt(pack):
 
 
 def test_q0c_bau_log_enthaelt_accesspopup_stage(build_log_text):
-    skip_line = "Skip /pi-gen/stage2/07-accesspopup/01-run.sh (not executable)"
+    skip_line = "Skip /pi-gen/stage-custom/07-accesspopup/01-run.sh (not executable)"
     assert skip_line not in build_log_text, (
         "07-accesspopup/01-run.sh wurde wegen fehlendem Exec-Bit uebersprungen "
-        "-> AccessPopup ist NICHT im Image. Fix: chmod +x stage2/07-accesspopup/"
-        "01-run.sh (Overlay + pi-gen-Kopie), dann Rebuild."
+        "-> AccessPopup ist NICHT im Image. Fix: chmod +x stage-custom/"
+        "07-accesspopup/01-run.sh, dann Rebuild."
     )
-    assert "Begin /pi-gen/stage2/07-accesspopup/01-run.sh" in build_log_text, (
+    assert "Begin /pi-gen/stage-custom/07-accesspopup/01-run.sh" in build_log_text, (
         "Build-Log enthaelt keinen Lauf von 07-accesspopup/01-run.sh: das Image "
         "wurde vor der AccessPopup-Integration gebaut -> Rebuild noetig "
         "(siehe ros-pi-gen/README.md)."
     )
-    assert "End /pi-gen/stage2/07-accesspopup/01-run.sh" in build_log_text, (
+    assert "End /pi-gen/stage-custom/07-accesspopup/01-run.sh" in build_log_text, (
         "07-accesspopup/01-run.sh wurde nicht sauber abgeschlossen (Build abgebrochen?"
     )
 
 
 def test_q0d_bau_log_vollstaendig(pack: ImagePack, build_log_path, build_log_text):
-    assert "Begin /pi-gen" in build_log_text and "Build finished" in build_log_text, (
+    # pi-gen hängt an work/<IMG_NAME>/build.log AN — das Log kann mehrere
+    # Läufe enthalten. Dieser Test analysiert bewusst nur das LETZTE Segment
+    # (ab dem letzten Top-Level "Begin /pi-gen", Zeilenende-Anker — format-
+    # unabhängig, build-docker.log trägt Docker-Timestamps vor der Zeile):
+    # Workdir-Match und Export-Check beziehen sich dann auf genau den Build,
+    # der auch das aktuelle Image erzeugt hat.
+    anker = None
+    for anker in re.finditer(r"Begin /pi-gen$", build_log_text, re.MULTILINE):
+        pass
+    assert anker, "Kein Top-Level 'Begin /pi-gen' im Build-Log."
+    segment = build_log_text[anker.start():]
+
+    assert "Begin /pi-gen" in segment and "Build finished" in segment, (
         f"Build-Log {build_log_path.name} ist unvollstaendig (kein 'Build finished') "
         "- Log evtl. von abgebrochenem Build."
     )
-    assert "/pi-gen/export-image" in build_log_text, (
+    assert "/pi-gen/export-image" in segment, (
         "Build-Log enthaelt keinen export-image-Lauf (kein Image erzeugt?)."
     )
-    m = re.search(r"/pi-gen/work/([a-zA-Z0-9_-]+)/", build_log_text)
+    m = re.search(r"/pi-gen/work/([a-zA-Z0-9_-]+)/", segment)
     assert m, "Workdir-Name im Build-Log nicht auffindbar."
     image_core = pack.source.name.removeprefix("image_").split(".img")[0]
     # pi-gen haengt je nach Konfiguration Suffixe wie '-lite' an; der Workdir-Name
     # muss im Imagenamen enthalten sein (datei: <datum>-<workdir>[<suffix>]).
+    # Bewusst Teilstring-Match statt exaktem Abgleich: der Workdir ist der
+    # IMG_NAME-spezifische Praefix, ein False-Positive (fremdes Log, dessen
+    # Workdir zufaellig als Substring passt) ist bei diesem Namensschema
+    # praktisch ausgeschlossen.
     assert m.group(1) in image_core, (
         f"Workdir '{m.group(1)}' passt nicht zum Imagenamen '{image_core}' "
         "- Log evtl. von anderem Build."
@@ -91,6 +110,11 @@ def test_q0e_bau_log_begin_end_paare(build_log_text):
                         stack.pop()
                     if stack:
                         stack.pop()
+                # Best-Effort-Diagnose: ab dem ersten echten Strukturbruch ist
+                # der Stack nicht mehr vertrauenswürdig — nachfolgende, eigentlich
+                # korrekte Paare können dann fälschlich markiert werden. problems
+                # ist dann ein Hinweis auf DASS etwas kaputt ist, keine präzise
+                # Paar-Diagnose mehr; das Log wird ohnehin verworfen.
             else:
                 stack.pop()
         elif kind == "Skip":
@@ -113,30 +137,57 @@ REQUIRED_SUBSTAGES = [
     "/pi-gen/stage2/01-sys-tweaks",
     "/pi-gen/stage2/02-net-tweaks",
     "/pi-gen/stage2/04-cloud-init",
-    "/pi-gen/stage2/05-docker-ansible/01-run.sh",
-    "/pi-gen/stage2/05-docker-ansible/02-packages",
-    "/pi-gen/stage2/05-docker-ansible/03-run.sh",
-    "/pi-gen/stage2/06-variant",
-    "/pi-gen/stage2/07-accesspopup/00-packages",
-    "/pi-gen/stage2/07-accesspopup/01-run.sh",
+    "/pi-gen/stage-custom/prerun.sh",
+    "/pi-gen/stage-custom/05-docker-ansible/01-run.sh",
+    "/pi-gen/stage-custom/05-docker-ansible/02-packages",
+    "/pi-gen/stage-custom/05-docker-ansible/03-run.sh",
+    "/pi-gen/stage-custom/07-accesspopup/00-packages",
+    "/pi-gen/stage-custom/07-accesspopup/01-run.sh",
     "/pi-gen/export-image",
     "/pi-gen/export-image/05-finalise",
 ]
 
+# Variante als Sub-Stage-Praefix (06-variant-headless/-desktop, je nach
+# VARIANT-Auswahl beim Build); beide sind gueltig, genau eine muss gelaufen
+# sein. Alte Logs (Pre-stage-custom) nutzen /pi-gen/stage2/06-variant.
+VARIANT_SUBSTAGE_PATTERN = re.compile(
+    r"^/pi-gen/(stage-custom|stage2)/06-variant(-[a-z]+)?$"
+)
+
 
 def test_q0f_bau_log_pflichtstufen(build_log_text):
+    # Bewusst Mengen-Check, kein Stack: prueft nur die VOLLSTÄNDIGKEIT
+    # (jede Pflichtstufe min. einmal begonnen und beendet), nicht Reihenfolge
+    # oder Verschachtelung — dafür ist test_q0e (Begin/End-Stack) zuständig.
+    # Doppelte Begin ohne dazwischenliegendes End fallen hier ebenfalls nicht
+    # auf (würde q0e als End-Reihenfolge-Problem zeigen).
     begins = {token for kind, token in _log_events(build_log_text) if kind == "Begin"}
     ends = {token for kind, token in _log_events(build_log_text) if kind == "End"}
     fehlt_begin = [t for t in REQUIRED_SUBSTAGES if t not in begins]
     fehlt_end = [t for t in REQUIRED_SUBSTAGES if t in begins and t not in ends]
     assert not fehlt_begin, f"Pflichtstufen nie gestartet: {fehlt_begin}"
     assert not fehlt_end, f"Pflichtstufen ohne End: {fehlt_end}"
+    variant_stages = [t for t in begins if VARIANT_SUBSTAGE_PATTERN.match(t)]
+    assert variant_stages, (
+        "Keine Varianten-Sub-Stage (06-variant*) im Build-Log — "
+        "Paketlisten-Stufe fehlt (make VARIANT=headless|desktop)."
+    )
 
 
 def test_q0g_bau_log_installationsnachweis(build_log_text):
+    # Beleg akzeptiert beide apt-Stände: Erstinstallation ("Setting up …")
+    # und Wiederholungslauf mit persistiertem work/ ("already the newest
+    # version" — Paket ist dann bereits im RootFS installiert).
     for paket in ("docker-ce", "ansible"):
-        m = re.search(rf"Setting up {re.escape(paket)} \(", build_log_text)
-        assert m, f"'Setting up {paket}' nicht im Build-Log (Installation nicht belegbar)."
+        m = re.search(
+            rf"(Setting up {re.escape(paket)} \(|"
+            rf"{re.escape(paket)} is already the newest version \()",
+            build_log_text,
+        )
+        assert m, (
+            f"Weder 'Setting up {paket}' noch '{paket} is already the newest "
+            f"version' im Build-Log (Installation nicht belegbar)."
+        )
     assert re.search(r"/etc/sudoers\.d/acpu: parsed OK", build_log_text), (
         "visudo-Pruefung fehlt im Build-Log (Q8-Beleg)."
     )
