@@ -17,8 +17,15 @@ python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
 ./run_tests.sh -k q5              # einzelner Test
 ./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vor dem Lauf löschen
 
-# Hardware-Lauf (Gruppe Q final am echten Pi, read-only):
+# Hardware-Lauf (Gruppe Q final am echten Pi, read-only; Q6/Q8 zeigen als pi SKIP):
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
+
+# Einzelne privilegierte Checks mit sudo (TTY fuer Passwortprompt):
+ssh -t pi@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
+ssh -t pi@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
+
+# Oder vollständiger Smoke-Test unter root:
+ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
 ```
 
 Komfortabler via Makefile im Repo-Root: `make venv`, `make test`
@@ -103,13 +110,22 @@ hier endgültig — insbesondere **Q6 gegen den echten bcm-Kernel**:
 
 ```bash
 ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
+
+# Vollständiger Hardware-Smoke mit sudo/root (TTY fuer Passwortprompt):
+ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
+
+# Oder nur einzelne privilegierte Checks:
+ssh -t pi@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
+ssh -t pi@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
 ```
 
-Erzeugt eine Markdown-Tabelle (Q-IDs, PASS/FAIL), Beobachtungs-Hilfen für
-A/B/D (hostname→SSID, NM-Profile, AP-Zustand, Port 8052, nft-Tabellen,
-`accesspopup.conf` mit maskiertem Passwort, Journal-Tail) und Exit-Code 0
-nur bei bestandenen harten Q-Checks. Status-Schnellreport ohne Pass/Fail-
-Logik: `tools/pi-state.sh`.
+Erzeugt eine Markdown-Tabelle (Q-IDs, PASS/FAIL/SKIP) und Beobachtungs-Hilfen
+für A/B/D. Q6 (`nft -c`) und Q8 (`visudo` auf sudoers) benötigen root. Läuft
+der Smoke-Test als normaler Benutzer, werden diese Checks als SKIP ausgegeben
+und die nötigen `sudo`-Befehle angezeigt; alle übrigen harten Checks müssen
+bestehen. Für die vollständige Prüfung kann das ganze Skript mit root-Rechten
+laufen; alternativ nur Q6/Q8 separat mit den obigen Befehlen prüfen. Status-
+Schnellreport ohne Pass/Fail-Logik: `tools/pi-state.sh`.
 
 Empfohlener Abnahmefluss: erst `run_tests.sh` am Build-Host (spürt
 Build-/Paketierfehler vor dem Flashen), dann `pi-smoke.sh` am Gerät, dann

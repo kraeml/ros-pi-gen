@@ -407,7 +407,8 @@ Unter `tests/` automatisiert eine pytest-Suite die Gruppe Q des
 
 ```bash
 .venv/bin/python -m pytest tests     # oder: tests/run_tests.sh
-ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh        # Hardware-Lauf
+ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh        # Hardware-Lauf (Q6/Q8 SKIP ohne Root)
+ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh # optional vollständig privilegiert
 ```
 
 Details, Grenzen und die Begründung zum verworfenen QEMU-Kernel-Boot-Test:
