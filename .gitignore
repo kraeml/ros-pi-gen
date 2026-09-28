@@ -11,3 +11,5 @@ __pycache__/
 # Varianten-Umschalter (make VARIANT=… — make setup setzt sie zurück)
 stage-custom/06-variant-headless/SKIP
 stage-custom/06-variant-desktop/SKIP
+
+/.opencode/

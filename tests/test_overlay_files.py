@@ -39,6 +39,36 @@ def test_overlay_skripte_executable():
     assert not broken, f"Skripte ohne Exec-Bit: {broken} (chmod +x in Overlay + pi-gen-Kopie)"
 
 
+def test_overlay_user_data_stage_installs_seed():
+    stage = STAGE_CUSTOM / "04-user-data"
+    run = stage / "01-run.sh"
+    seed = stage / "files" / "user-data"
+    assert run.is_file(), "04-user-data/01-run.sh fehlt"
+    assert os.access(run, os.X_OK), "04-user-data/01-run.sh ohne Exec-Bit"
+    assert seed.is_file(), "04-user-data/files/user-data fehlt"
+    assert '"${ROOTFS_DIR}/boot/firmware/user-data"' in run.read_text()
+    assert stage.name < "05-docker-ansible"
+    text = seed.read_text()
+    assert "users:" in text
+    assert "- default" not in text
+    assert "- name: robot" in text
+    assert "plain_text_passwd: robot" in text
+    assert "docker" in text
+    assert text.count("ssh_authorized_keys:") == 1
+    assert text.count("      - \"ecdsa-sha2-nistp384 ") == 1
+    assert text.count("      - \"ssh-rsa ") == 1
+    assert "lock_passwd: false" in text
+    assert "ssh_pwauth: true" in text
+    assert "network:" not in text
+
+
+def test_overlay_accesspopup_allows_ssh_from_ap():
+    rules = STAGE_CUSTOM / "07-accesspopup" / "files" / "nft-accesspopup.rules"
+    text = rules.read_text()
+    assert 'iifname "wlan0" ip saddr 192.168.50.0/24 tcp dport 22 accept' in text
+    assert 'iifname "wlan0" drop comment "AP: kein Docker/ROS/lokale Dienste"' in text
+
+
 def test_overlay_00_packages_vorhanden():
     fehlend = []
     for stage in _sub_stages():

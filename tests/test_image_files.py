@@ -32,6 +32,7 @@ ROOTFS_MANIFEST: list[tuple[str, str]] = [
     ("/etc/NetworkManager/dnsmasq-shared.d/01-wildcard.conf", "marker:192.168.50.5"),
     ("/etc/nftables.d/accesspopup.rules", "marker:table ip accesspopup"),
     ("/etc/nftables.d/accesspopup.rules", "marker:redirect to :8052"),
+    ("/etc/nftables.d/accesspopup.rules", 'marker:tcp dport 22 accept comment "AP: SSH zum Pi"'),
     # Web-UI
     ("/etc/systemd/system/acpu_web.service", "exists"),
     ("/etc/systemd/system/acpu_web_app.service", "exists"),
@@ -94,7 +95,6 @@ def test_image_boot_datei(pack, name):
 @pytest.mark.parametrize(
     "name,erlaubte_schluessel",
     [
-        ("user-data", set()),
         ("network-config", set()),
         # meta-data ist absichtlich NICHT leer: dsmode: local = user-data
         # vor dem Netzwerk-Start anwenden; instance_id = feste NoCloud-ID
@@ -104,12 +104,7 @@ def test_image_boot_datei(pack, name):
     ids=lambda v: f"boot/{v}",
 )
 def test_image_boot_cloudinit_template_inert(pack, name, erlaubte_schluessel):
-    """Cloud-init-Templates auf bootfs bleiben ohne Imager inaktiv.
-
-    user-data/network-config: nur Kommentare (cloud-init tut nichts, bis
-    Imager 2.0 sie bei Customization ueberschreibt). meta-data: nur die
-    zwei beabsichtigten NoCloud-Schluessel.
-    """
+    """Netzwerk-Template bleibt inert; meta-data enthaelt nur NoCloud-Werte."""
     text = (pack.boot_dir / name).read_text()
     assert text.lstrip().startswith("#"), f"{name} ist kein Kommentartemplate"
     aktiv = {
@@ -120,3 +115,19 @@ def test_image_boot_cloudinit_template_inert(pack, name, erlaubte_schluessel):
     assert aktiv <= erlaubte_schluessel, (
         f"{name} enthaelt unerwartete aktive Schluessel: {sorted(aktiv - erlaubte_schluessel)!r}"
     )
+
+
+def test_image_boot_user_data_quickfix(pack):
+    text = (pack.boot_dir / "user-data").read_text()
+    assert text.startswith("#cloud-config\n")
+    assert "- default" not in text
+    assert "- name: robot" in text
+    assert "groups: [adm, audio, cdrom, dialout, docker, games, gpio, i2c, input, lpadmin, netdev, plugdev, render, spi, sudo, users, video]" in text
+    assert "plain_text_passwd: robot" in text
+    assert text.count("ssh_authorized_keys:") == 1
+    assert text.count("      - \"ecdsa-sha2-nistp384 ") == 1
+    assert text.count("      - \"ssh-rsa ") == 1
+    assert "lock_passwd: false" in text
+    assert "ssh_pwauth: true" in text
+    assert "hostname:" not in text
+    assert "network:" not in text

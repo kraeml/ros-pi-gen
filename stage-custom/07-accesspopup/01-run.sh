@@ -7,7 +7,7 @@
 # - hostname-SSID (<hostname>-AP; Hostname via Pi-Imager = Geräteidentität)
 # - Dispatcher-Gating: Web-UI + nft-Regeln nur im AP-Fenster
 # - DNS-Wildcard + Port-80-Redirect auf 8052 (Captive-Portal-Erkennung)
-# - nftables-Isolation der AP-Clients (kein Internet/SSH/Docker/ROS)
+# - nftables-Isolation der AP-Clients (SSH zum Pi erlaubt; kein Internet/Docker/ROS)
 #
 # Build-Regeln (pi-gen-Chroot): kein NM-Start, kein AP, kein Scan, kein
 # accesspopup-Lauf im Build; Units werden nur installiert und enable'd.

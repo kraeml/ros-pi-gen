@@ -3,7 +3,7 @@
 # (Testprotokoll-AccessPopup.md) direkt am echten Pi – read-only.
 #
 # Aufruf (vom Build-Host):
-#   ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
+#   ssh robot@<ip> 'bash -s' < tests/tools/pi-smoke.sh
 #
 # Output: Markdown mit Protokoll-IDs (Q1–Q9, Extras) + Beobachtungs-Hilfen
 # fuer die Gruppen A/B/D. Exit-Code 1 = FAIL; root-only checks are SKIPped.

@@ -17,15 +17,16 @@ python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
 ./run_tests.sh -k q5              # einzelner Test
 ./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vor dem Lauf löschen
 
-# Hardware-Lauf (Gruppe Q final am echten Pi, read-only; Q6/Q8 zeigen als pi SKIP):
-ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
+# Hardware-Lauf (Gruppe Q final am echten Pi, read-only; Q6/Q8 zeigen als robot SKIP):
+ssh robot@<ip> 'bash -s' < tests/tools/pi-smoke.sh
 
+# Temporäres Login: robot / robot; hinterlegte SSH-Keys sind bevorzugt.
 # Einzelne privilegierte Checks mit sudo (TTY fuer Passwortprompt):
-ssh -t pi@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
-ssh -t pi@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
+ssh -t robot@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
+ssh -t robot@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
 
 # Oder vollständiger Smoke-Test unter root:
-ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
+ssh -t robot@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
 ```
 
 Komfortabler via Makefile im Repo-Root: `make venv`, `make test`
@@ -63,7 +64,7 @@ Kein sudo nötig.
 | `test_q0a–d` | – | Image vorhanden, pi-gen-Commit gepinnt (`74d08a3`), `07-accesspopup/01-run.sh` gelaufen (nicht geskippt), Log vollständig & zum Image passend | Build-Log + `.info` |
 | `test_q0e–g` | – | Build-Log: jedes `Begin` hat `End`, **kein `Skip`**, Pflichtstufen komplett (stage0–2 inkl. 05/06/07 + export-image), docker-ce/ansible-Installation belegbar (`Setting up …` bei Erstinstallation, `… is already the newest version` bei Wiederholungslauf mit persistiertem `work/`) + visudo-Beleg | Build-Log |
 | `test_q1a` | Q1 | systemd-Boot des RootFS im arm64-Container: `running`/`degraded` + exec-Zugang | Docker, privilegiert |
-| `test_image_files[*]` | – | Datei-Manifest: Overlay-Dateien im RootFS + Boot-Partition, Docker/Ansible-Binaries, Inhalts-Marker (`ap_pw`, `table ip accesspopup`, Redirect 8052, …) | debugfs |
+| `test_image_files[*]` | – | Datei-Manifest: Overlay-Dateien im RootFS + Boot-Partition, Cloud-init-Quickfix `robot`/SSH, Docker/Ansible-Binaries, Inhalts-Marker (`ap_pw`, `table ip accesspopup`, Redirect 8052, …) | debugfs |
 | `test_q2` | Q2 | `AccessPopup.timer` = `enabled` | Container |
 | `test_q3` | Q3 | `hostname-ssid.service` = `enabled` | Container |
 | `test_q4` | Q4 | `acpu_web*` **nicht** enabled; keine wants-Symlinks | Container + debugfs |
@@ -109,14 +110,14 @@ Q2–Q9 eigenständig weiter.
 hier endgültig — insbesondere **Q6 gegen den echten bcm-Kernel**:
 
 ```bash
-ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh
+ssh robot@<ip> 'bash -s' < tests/tools/pi-smoke.sh
 
 # Vollständiger Hardware-Smoke mit sudo/root (TTY fuer Passwortprompt):
-ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
+ssh -t robot@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh
 
 # Oder nur einzelne privilegierte Checks:
-ssh -t pi@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
-ssh -t pi@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
+ssh -t robot@<ip> 'sudo /usr/sbin/nft -c -f /etc/nftables.d/accesspopup.rules'
+ssh -t robot@<ip> 'sudo /usr/sbin/visudo -cf /etc/sudoers.d/acpu'
 ```
 
 Erzeugt eine Markdown-Tabelle (Q-IDs, PASS/FAIL/SKIP) und Beobachtungs-Hilfen

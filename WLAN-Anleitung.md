@@ -61,7 +61,7 @@ geht es nur um das WLAN zu Hause.
 - Der Roboter merkt sich **beide** WLANs: In der Schule verbindet er sich
   mit dem Schul-WLAN, zu Hause mit dem Heim-WLAN — ganz ohne Neueinrichtung.
 - Mit dem Heim-WLAN erreichst du den Roboter wie üblich über SSH
-  (`ssh pi@roboter-07` bzw. die IP-Adresse).
+  (`ssh robot@roboter-07` bzw. die IP-Adresse).
 - Der AP-Verschlüsselungsmodus ist WPA2; bei längeren AP-Sitzungen (über
   10 Minuten, z. B. Fehlersuche) bittet die Lehrkraft um Passwort-Änderung
   in der Web-Oberfläche des AP.

@@ -12,7 +12,7 @@
 #   make ci                           # venv lint setup build test
 #
 # Variablen (über Env oder Kommandozeile): MODE, VARIANT, ENGINE,
-# CONTINUE, PRESERVE_CONTAINER, CLEAN, SKIP_IMAGES_BUILD
+# CONTINUE, PRESERVE_CONTAINER, CLEAN, SKIP_IMAGES_BUILD, APT_PROXY
 # (letzte: pi-gens SKIP_IMAGES-Mechanismus für schnelleren Iterationslauf,
 # siehe README, „Entwicklung: schnelle Iteration“).
 
@@ -114,7 +114,8 @@ lint: venv guard-pigen
 
 # --- setup ------------------------------------------------------------------
 # Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs
-# würden in stage-custom sonst doppelt/falsch ausgeführt). KRITISCH ist
+# würden in stage-custom sonst doppelt/falsch ausgeführt). Dies umfasst auch
+# die temporäre Cloud-init-Seed-Stage 04-user-data. KRITISCH ist
 # pi-gen/config: build.sh sourced es im Container VOR -c /config — ein
 # Stale-Overlay-Stand (STAGE_LIST ohne stage-custom) würde über den
 # ${STAGE_LIST:-…}-Soft-Default der Repo-Config gewinnen, stage-custom
@@ -124,7 +125,7 @@ setup: guard-pigen clean-variant-skips
 ifeq ($(MODE),stage-custom)
 	@rm -f $(PIGEN_DIR)/stage2/SKIP_IMAGES
 	@touch $(PIGEN_DIR)/stage2/SKIP_IMAGES
-	@rm -rf $(PIGEN_DIR)/stage2/05-docker-ansible $(PIGEN_DIR)/stage2/06-variant* $(PIGEN_DIR)/stage2/07-accesspopup
+	@rm -rf $(PIGEN_DIR)/stage2/04-user-data $(PIGEN_DIR)/stage2/05-docker-ansible $(PIGEN_DIR)/stage2/06-variant* $(PIGEN_DIR)/stage2/07-accesspopup
 	@rm -f $(PIGEN_DIR)/config
 	@test ! -f $(PIGEN_DIR)/config || { echo "pi-gen/config ließ sich nicht entfernen — Stale-Overlay-Stand würde stage-custom verschatten" >&2; exit 1; }
 	@$(MAKE) --no-print-directory apply-variant
@@ -132,7 +133,7 @@ ifeq ($(MODE),stage-custom)
 else ifeq ($(MODE),overlay)
 	@printf "[WARNUNG] MODE=overlay ist der Legacy-Weg (gerichtete cps, dirty Tree) — Default ist stage-custom.\n" >&2
 	@rm -f $(PIGEN_DIR)/stage2/SKIP_IMAGES
-	@cp -r $(STAGE_DIR)/05-docker-ansible $(STAGE_DIR)/07-accesspopup $(PIGEN_DIR)/stage2/
+	@cp -r $(STAGE_DIR)/04-user-data $(STAGE_DIR)/05-docker-ansible $(STAGE_DIR)/07-accesspopup $(PIGEN_DIR)/stage2/
 	@rm -rf $(PIGEN_DIR)/stage2/06-variant-headless $(PIGEN_DIR)/stage2/06-variant-desktop
 	@cp -r $(STAGE_DIR)/06-variant-$(VARIANT) $(PIGEN_DIR)/stage2/06-variant
 	@sed -e 's@^export STAGE_LIST=.*@export STAGE_LIST="$${BASE_DIR}/stage0 $${BASE_DIR}/stage1 $${BASE_DIR}/stage2"@' \
@@ -167,10 +168,12 @@ ifeq ($(ENGINE),docker)
 	@rm -f $(STAGE_DIR)/SKIP_IMAGES
 	@if [ -n "$(SKIP_IMAGES_BUILD)" ]; then touch $(STAGE_DIR)/SKIP_IMAGES; fi
 	@CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
+	  APT_PROXY='$(APT_PROXY)' \
 	  PIGEN_DOCKER_OPTS='$(PIGEN_DOCKER_OPTS)' \
 	  tools/build-docker.sh
 else ifeq ($(ENGINE),native)
 	cd $(PIGEN_DIR) && sudo env \
+	  APT_PROXY='$(APT_PROXY)' \
 	  STAGE_LIST="$(PIGEN_DIR)/stage0 $(PIGEN_DIR)/stage1 $(PIGEN_DIR)/stage2 $(STAGE_DIR)" \
 	  WORK_DIR=$(WORK_DIR)/'$(shell source $(REPO_ROOT)/config && echo $${IMG_NAME})' \
 	  DEPLOY_DIR=$(DEPLOY_DIR) \

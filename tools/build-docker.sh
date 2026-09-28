@@ -15,7 +15,7 @@
 # Entry für den gesamten Host (F-Flag hält den Interpreter-FD offen, auch
 # über Container-Ende hinaus) — cleanup danach ist Pflicht.
 #
-# Umgebung (von make übergeben): CONTINUE, PRESERVE_CONTAINER,
+# Umgebung (von make übergeben): CONTINUE, PRESERVE_CONTAINER, APT_PROXY,
 # PIGEN_DOCKER_OPTS.
 set -u
 

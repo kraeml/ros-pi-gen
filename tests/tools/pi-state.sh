@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Status-Report fuer die Hardware-Testgruppen A–D (Abnahmetests
 # Testprotokoll-AccessPopup.md). Nur lesend; auf dem Pi ausfuehren, z. B.:
-#   ssh pi@192.168.50.5 'bash -s' < tests/tools/pi-state.sh
+#   ssh robot@192.168.50.5 'bash -s' < tests/tools/pi-state.sh
 # Liefert Markdown-Beobachtungen fuer die Spalten "Beobachtet"/"OK".
 
 set -u

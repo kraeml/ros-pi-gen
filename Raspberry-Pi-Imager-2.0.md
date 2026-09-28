@@ -53,7 +53,15 @@ Damit ein Image kompatibel ist, braucht es mehrere Zutaten, nicht nur eine:
 - Das aktivierte Cloud-init-Modul **`cc_raspberry_pi`** macht Raspberry-Pi-eigene Konfigurationsoptionen erst nutzbar.
 - Zusätzlich braucht die Distribution die passende Anpassung namens **`raspi-config-vendor`** – das ist die distributionsspezifische Integration, die `cc_raspberry_pi` mit den tatsächlichen Systemwerkzeugen verbindet. `cc_raspberry_pi` allein reicht nicht. ([raspberrypi.com](https://www.raspberrypi.com/news/how-to-add-your-own-images-to-imager/))
 
-Wichtige Einschränkung: Kopierst du Cloud-init-Dateien manuell auf die Boot-Partition eines fertigen Images, funktioniert das nur, wenn alle diese Zutaten zusammenpassen. Nicht jedes Image ist dafür vorbereitet.
+Wichtige Einschränkung: Kopierst du Cloud-init-Dateien manuell auf die
+Boot-Partition eines fertigen Images, funktioniert das nur, wenn alle diese
+Zutaten zusammenpassen. Nicht jedes Image ist dafür vorbereitet. Das
+ros-pi-gen-Image enthält vorübergehend eine aktive `user-data` für `robot` mit
+dem gemeinsamen Passwort `robot`, hinterlegten SSH-Schlüsseln und Passwort-SSH.
+Imager kann sie bei
+der Customization ersetzen; plane Benutzer und Zugangsdaten daher im Wizard
+erneut ein. Die feste Zugangskonfiguration wird entfernt, sobald das
+Repository-JSON-Feature verfügbar ist.
 
 **Und was ist mit `systemd`?** Neben `cloudinit` und `cloudinit-rpi` kennt Imager auch den Wert `systemd` – das ältere, klassische `bootfs`/`firstrun.sh`-Verfahren, bei dem ein Shell-Skript beim ersten Start läuft. Für eigene, ältere Custom Images ist das oft die einzig realistische Option: Cloud-init ist eben nicht die einzige Konfigurationsmethode, die Imager unterstützt, nur die modernere. ([raspberrypi.com](https://www.raspberrypi.com/news/how-to-add-your-own-images-to-imager/))
 
