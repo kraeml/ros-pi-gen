@@ -1,129 +1,139 @@
 # Agenten-Anweisung: Veröffentlichung von ros-pi-gen-Images
 
-## Ziel und Umfang
+## Ziel und maßgebliche Regeln
 
-Das fertige Image soll über den Raspberry Pi Imager mit einem eigenen Repository-Manifest auffindbar und herunterladbar sein. Maßgebliche Verteilung ist S3-kompatibler Objektspeicher; GitHub Releases sind ebenso Teil des Veröffentlichungswegs.
+Das Image soll über den Raspberry Pi Imager mit eigenen Repository-Manifesten auffindbar und herunterladbar sein. Hetzner-S3 und GitHub Releases sind beide Downloadziele. S3-Manifest und S3-Image sind maßgeblich; GitHub Release-Artefakte spiegeln dieselbe Version als zusätzliches Downloadziel.
 
-Build, Tests, Paketierung und S3-Upload müssen über Make-Targets und versionierte Skripte lokal ausführbar und unabhängig von GitHub sein. GitHub Actions ist ein Runner-Adapter, Ziel der Build-Logik und auch einer Publish-Logik. Dieselbe Kette soll später auf Codeberg, GitLab oder einem selbst betriebenen lokalen Runner laufen können. Zugangsdaten werden jeweils als Runner-Secrets oder lokale AWS-CLI-Profile bereitgestellt und **nie** ins Repository geschrieben.
+Build, Tests, Paketierung und S3-Veröffentlichung müssen über Make-Targets und versionierte Skripte lokal ausführbar und unabhängig von GitHub sein. GitHub Actions ist zunächst ein Runner-Adapter. Dieselbe portable Logik soll auch auf Codeberg, GitLab oder einem lokalen Runner laufen; plattformabhängig bleiben Trigger, Secret-Injektion, Runner-Setup und Release-Adapter. Secrets werden nie ins Repository geschrieben.
 
-Erste vollständige Veröffentlichungskette: Image bauen und testen, Imager-Manifest samt Prüfsummen paketieren, anschließend Image und Manifest per HTTPS erreichbar auf S3 veröffentlichen. Lokaler HTTP-Test und OMV/LAN-Test sind vorgelagerte Prüfschritte. Änderungen an der GitHub-Automatisierung erfolgen erst nach den vorgesehenen Gates. Jedes Freigabe-Gate bekommt ein eignes git flow feature und nach Freigabe kann dieses geschlossen werden.
+Jedes Freigabe-Gate bekommt ein eigenes git-flow-Feature. Nach Freigabe kann das Feature geschlossen werden. Keine Bucket-Erstellung, Änderung öffentlichen Zugriffs, Pushes oder Tags mit echten CI-/Upload-Effekten ohne die jeweils erforderliche ausdrückliche Freigabe.
 
 ## Reihenfolge und Freigabe-Gates
 
-1. Lokaler HTTP-Test auf der Developer-Maschine.
-2. OMV-S3-Test im lokalen Heim- bzw. Klassenzimmernetz.
-3. Hetzner-S3-Veröffentlichung für WAN-Zugriff.
-4. Portabler CI-Runner-Adapter; zunächst GitHub Actions, später gegebenenfalls Codeberg, GitLab oder lokaler Runner.
+Nach jeder Etappe Befund und Ergebnis melden und bis zur ausdrücklichen Freigabe für die nächste Etappe anhalten. Bucket-Erstellung und Änderungen an öffentlichem Zugriff benötigen eigene vorherige Freigabe.
 
-Nach jeder Etappe Ergebnis melden und auf Freigabe warten:
+1. **Lokaler HTTP-/Imager-Test:** `make package`, Manifest-Rendering und Variantenprüfung lokal implementieren; echte Raspberry Pi Imager-Annahme auf der Developer-Maschine testen.
+2. **OMV/LAN-Test:** `scripts/publish-s3.sh` implementieren und Testpakete lokal gegen OMV unter `ros-pi-gen-test/` veröffentlichen; Bucket-Erstellung und Public-Read benötigen vorherige Freigabe.
+3. **Hetzner/WAN-Test:** nach OMV-Freigabe Bucket/Lesbarkeit abstimmen und Testpakete ausschließlich unter `ros-pi-gen-test/` uploaden sowie Imager-Zugriff prüfen.
+4. **Runner-Adapter und Produktionsrelease:** erst nach Gate 3 GitHub Actions anlegen/aktivieren; portable Build-, Test- und Paketierungslogik bleibt dieselbe. Ein Produktions-Tag erzeugt das Release nach Hetzner und GitHub.
 
-- Gate 1: lokaler Imager-Test, vor OMV-Bucket-Anlage oder Upload.
+Nach jeder Etappe Befund und Ergebnis melden und auf Freigabe warten:
+
+- Gate 1: echter lokaler Imager-Test, vor OMV-Bucket-Anlage oder Upload.
 - Gate 2: OMV-Test, vor Hetzner-Bucket-Anlage oder Upload.
 - Gate 3: Hetzner-Veröffentlichung, vor Anlage oder Aktivierung des GitHub-Workflows.
-- Gate 4: vor jedem Push oder Tag, der einen echten CI-Build oder Upload auslösen kann.
-- Auch Bucket-Erstellung und Änderungen an öffentlichem Zugriff benötigen vorherige ausdrückliche Freigabe.
+- Gate 4: vor jedem Push/Tag, der einen echten CI-Build oder Upload auslösen kann.
 
-## S3-Profile und Ziele
+## S3-Profile, Buckets und Zugriff
 
-AWS CLI v2 ist installiert. Vor S3-Aktionen Profilkonfiguration prüfen, ohne Zugangsschlüssel auszugeben oder zu protokollieren:
+AWS CLI v2 ist installiert. Vor S3-Aktionen Profilwerte prüfen, ohne Zugangsschlüssel auszugeben oder zu protokollieren:
 
-- OMV-Profil: `s3-intern`; Endpoint `https://s3-intern.kraeml-bayern.de`. konfigurierte Region `eu-central-1`;
-- Hetzner-Profil: `hetzner-prod`; Endpoint `https://hel1.your-objectstorage.com`; konfigurierte Region `hel1`. Die Profilwerte sind maßgeblich; keine Region aus anderen Hetzner-Regionen übernehmen.
-- Bucketname auf beiden unabhängigen S3-Diensten: `ros-pi-gen-images`. Beide Buckets existieren noch nicht. Die Namen müssen nur beim jeweiligen Anbieter eindeutig sein.
-- Objektpräfix in beiden Buckets: `ros-pi-gen/`. Manifest: `ros-pi-gen/imager/os-list.json`; Releases: `ros-pi-gen/releases/<version>/<Image-Dateiname>`.
+- OMV: Profil `s3-intern`, Endpoint `https://s3-intern.kraeml-bayern.de`, konfigurierte Region `eu-central-1`. Das lokale Profil ist aktuell nicht korrekt/funktionsfähig eingerichtet; Endpoint-Erreichbarkeit und S3-Kompatibilität vor Verwendung sicher prüfen. Das lässt die Anleitung für andere Klassenzimmer-OMV-Installationen unberührt.
+- Hetzner: Profil `hetzner-prod`, Endpoint `https://hel1.your-objectstorage.com`, Region `hel1`. Profilwerte sind maßgeblich; keine Region aus anderen Hetzner-Standorten übernehmen.
+- Bucketname auf beiden unabhängigen Diensten: `ros-pi-gen-images`. Beide Buckets existieren noch nicht; derselbe Name darf bei den getrennten Anbietern verwendet werden.
+- Objektpräfixe: Produktion ausschließlich unter `ros-pi-gen/`, Gate-2/3-Testveröffentlichungen ausschließlich unter `ros-pi-gen-test/` im selben Bucket. S3-Stabilmanifeste liegen unter `<präfix>/imager/<variant>/s3/os-list.json`; versionierte Manifestkopien werden unter `<präfix>/releases/<version>/<variant>-os-list.json` archiviert; Versionen enthalten bei Testpaketen bereits das `-test`-Suffix. Varianten sind `headless` und `desktop`. GitHub-Manifeste sind nur Release-Assets, keine S3-Objekte.
 
-Vor Erstellung jeweils Anbieter, Endpoint, Region, Berechtigungen und Bucketname verifizieren. Bucket nicht ohne Gate anlegen. Bestehende Profile nicht überschreiben oder Zugangsdaten ändern. Bei einer Schule mit eigener OMV-Installation ist das Schulprofil separat einzurichten; `s3-intern` und dessen Zugangsdaten sind nicht übertragbar.
+Vor Bucket-Erstellung Anbieter, Endpoint, Region und Berechtigungen verifizieren. Vor Upload prüfen, ob die Zielversion bereits Objekte unter dem gewählten Präfix (`ros-pi-gen/` oder `ros-pi-gen-test/`) enthält; bei Treffern sicher abbrechen. Bei einem Teilfehler dieselbe Version nicht erneut verwenden; nach Prüfung und Entscheidung nächste PATCH-Version wählen. Diese Prüfung reduziert, garantiert aber keine atomare Sperre; parallele Produktions-Publishes derselben Version per Workflow-Concurrency serialisieren. Die Bucket-Erstellung benötigt ausdrückliche Freigabe. Anonyme öffentliche Lesezugriffe auf Imager-Manifest und Image sind erforderlich; Public-Read-Konfiguration ebenfalls nur nach ausdrücklicher Freigabe ändern. Keine bestehende Policy/ACL überschreiben. Ist die öffentliche HTTPS-Objekt-URL unbekannt oder Lesen nicht möglich, anhalten und Befund melden. Keine Objekte außerhalb des ausdrücklich gewählten Präfixes `ros-pi-gen/` oder `ros-pi-gen-test/` verändern oder löschen; Gate-2/3-Testpakete dürfen ausschließlich unter `ros-pi-gen-test/` schreiben.
 
-Öffentliche anonyme Lesezugriffe auf Manifest und Image sind nötig, damit Raspberry Pi Imager sie herunterladen kann. Vorhandene HTTPS-/Bucket-Konfiguration prüfen. Keine Bucket-Policy, ACL oder OMV-Einstellung ohne ausdrückliche Freigabe ändern. Falls öffentlicher Zugriff fehlt oder die öffentliche Objekt-URL nicht bekannt ist: anhalten, Befund und erforderliche Änderung nennen und Freigabe abwarten.
+## OMV im eigenen Klassenzimmer
 
-## Klassenzimmer-OMV einrichten
+Für eine Schule mit eigenem OpenMediaVault-S3-Dienst gelten deren eigene Angaben und Zugangsdaten; `s3-intern` ist nicht übertragbar:
 
-Für eine Schule mit eigenem OpenMediaVault und S3-kompatiblem Dienst gilt derselbe Ablauf, aber mit schulspezifischen Endpunkt-, Regions- und Zugangsdaten. Keine Zugangsdaten oder bestehenden Policies übernehmen:
+1. Mit der OMV-Administration prüfen, ob `ros-pi-gen-images` existiert; falls nicht, Bucket-Erstellung abstimmen. Gate-2-Testobjekte ausschließlich unter `ros-pi-gen-test/` ablegen; der Produktionspräfix `ros-pi-gen/` bleibt unberührt.
+2. Den vom konkreten S3-Dienst vorgegebenen HTTPS-Endpoint und dessen Signaturregion ermitteln. Beides ist installationsspezifisch und nicht aus der LAN-Erreichbarkeit ableitbar.
+3. AWS CLI v2 auf einem berechtigten Veröffentlichungsrechner mit einem dedizierten Profil, separaten Zugangsdaten und Schreibrechten nur auf das ausdrücklich gewählte Projektpräfix konfigurieren (Gate-2-Test ausschließlich `ros-pi-gen-test/`). Schüler erhalten keine Schreibzugänge.
+4. Mit der Administration anonymes Lesen per HTTPS für Manifest und Images beziehungsweise das ausdrücklich gewählte Projektpräfix einrichten. Keine Policy, ACL oder OMV-Einstellung ohne ausdrückliche Freigabe ändern.
+5. Aus dem Klassenzimmernetz Manifest und Image anonym abrufen, Prüfsumme vergleichen und Raspberry Pi Imager testen.
+6. Endpoint, Profilname, Bucket, bestätigte Region und Zugriffsvoraussetzungen lokal dokumentieren; keine Secrets committen oder zwischen Schulen teilen.
 
-1. Im OMV-S3-Dienst prüfen, ob der Bucket `ros-pi-gen-images` bereits existiert; andernfalls Bucket-Erstellung mit der OMV-Administration abstimmen.
-2. Den vom konkreten S3-Dienst vorgegebenen HTTP/HTTPS-Endpoint und die Signaturregion ermitteln. Beides ist installationsspezifisch und nicht aus der LAN-Erreichbarkeit ableitbar.
-3. AWS CLI v2 auf einem berechtigten Veröffentlichungsrechner verwenden. Ein dediziertes lokales Profil mit dem schuleigenen Endpoint, der bestätigten Region und separaten Zugangsdaten einrichten. Schreibrechte auf den Bucket beziehungsweise das Projektpräfix beschränken; Schüler benötigen keine Schreibzugänge.
-4. Mit der OMV-Administration anonymes Lesen per HTTP/HTTPS für Manifest und Images beziehungsweise das Projektpräfix einrichten. Keine Bucket-Policy, ACL oder OMV-Einstellung ohne ausdrückliche Freigabe ändern.
-5. Vom Klassenzimmernetz aus Manifest und Image abrufen, Prüfsumme kontrollieren und den Raspberry Pi Imager mit der Manifest-URL testen.
-6. Schulspezifischen Endpoint, Profilnamen, Bucket, bestätigte Region und Zugriffsvoraussetzungen lokal dokumentieren; keine Secrets committen oder mit anderen Schulen teilen.
+Ein nur im LAN erreichbarer OMV-Dienst ist erwartetes Verhalten. OMV dient der lokalen Klassenzimmerverteilung; Hetzner ist das WAN-Ziel.
 
-`ros-pi-gen-images` ist nur innerhalb des jeweiligen S3-Dienstes eindeutig zu halten; OMV und Hetzner können denselben Namen unabhängig voneinander verwenden. Wenn der Klassenzimmer-OMV-Server außerhalb des LAN nicht erreichbar ist, ist das erwartetes Verhalten. Die OMV-Quelle dient der Verteilung im eigenen Netz; Hetzner ist der WAN-Verteilweg.
+## Version, Varianten und Image-Paket
 
-## Versionierung und Image-Paket
+- Produktions-Tags haben exakt die Form `image-YYYY.MM.PATCH`, z. B. `image-2026.09.1`. Produktionsversion ausschließlich aus diesem Tag ableiten, nicht manuell oder aus einem anderen Git-Tag übernehmen. Tag muss dem CalVer-Schema entsprechen; ungültige oder bereits anderweitig veröffentlichte Versionen muss der Publish-Adapter vor dem Upload sicher ablehnen. Die erste Produktionsversion nach den Test-Gates ist nach Prüfung der Wiederverwendung die nächste PATCH-Version.
+- Gate-2/3-Testpakete verwenden annotierte lokale Test-Tags `image-YYYY.MM.PATCH-test`, z. B. `image-2026.09.1-test`; ihre Paketversion enthält das Suffix `-test`, ihr Anzeigename ist klar als Test markiert und sie werden ausschließlich lokal mit Status `test` nach `ros-pi-gen-test/releases/<version>/` publiziert, wobei `<version>` den Suffix `-test` bereits enthält. Testpaketierung prüft Format und Paketkonsistenz; der Publish-Adapter prüft Version/Wiederverwendung. Test-Tags werden nicht gepusht und erzeugen keine Produktionsmanifeste oder GitHub-Releases.
+- Lokale Gate-1-Pakete ohne Release-Tag erhalten Status `local-test` und einen klar als nicht veröffentlichbar markierten Testnamen. `local-test` darf weder nach S3 noch zu GitHub hochgeladen werden. Paketstatus und Paketversion sind getrennte Werte.
+- `YYYY.MM` ist der Veröffentlichungsmonat; PATCH beginnt bei 1 und wird je Veröffentlichung fortgezählt. `release_date` aus dem Tagger-Zeitstempel des annotierten Tags in UTC ableiten; Jahr/Monat müssen mit diesem UTC-Datum übereinstimmen, auch wenn der lokale Zeitpunkt noch im Vormonat lag. Lightweight-Tags (nicht annotiert) sind ungültig.
+- Headless und Desktop sind unabhängig installierbar. Beide erhalten dasselbe Namensmuster mit Variantenzusatz: `Roboter-OS <YYYY.MM.PATCH> (Headless)` bzw. `Roboter-OS <YYYY.MM.PATCH> (Desktop)`.
+- Kanonische Paketnamen: `roboter-os-<version>-headless.img.xz` und `roboter-os-<version>-desktop.img.xz`. S3 und GitHub verwenden exakt dieselben Image-Dateinamen.
+- `make package VARIANT=headless` beziehungsweise `VARIANT=desktop` paketiert je eine Variante. Vor S3-Publish oder GitHub-Release müssen beide Paketverzeichnisse in einem vollständigen Release-Paketverzeichnis mit identischer Version und Status zusammengeführt werden; Publish-Adapter lehnen unvollständige Pakete ab und prüfen die Version genau einmal pro Gesamtveröffentlichung.
+- Ein Produktionsrelease enthält zwei Variantenimages und zwei GitHub-Manifestassets: `headless-os-list.json` und `desktop-os-list.json`. S3 hat pro Variante ein eigenes stabiles Manifest unter `<präfix>/imager/<variant>/s3/os-list.json`; GitHub-Manifeste gibt es nur als Release-Assets. Jedes Manifest enthält genau einen passenden Eintrag und verweist auf genau ein Image; automatischer Fallback zwischen Quellen ist ausgeschlossen. Gate-2/3-Testmanifest-Dateinamen bleiben `os-list.json` und dieselben archivierten Variantennamen; sie dürfen nur unter `ros-pi-gen-test/` abgelegt werden.
+- GitHub-Manifeste liegen nur als Assets im passenden GitHub Release, nicht zusätzlich als Objekt im S3-Bucket. GitHub Release-Prereleases bleiben unveröffentlicht, damit `latest` weiterhin auf das vollständige Produktionsrelease zeigt. Ihre Image-URLs müssen auf das jeweilige versionierte Release-Asset `roboter-os-<version>-headless.img.xz` beziehungsweise `roboter-os-<version>-desktop.img.xz` zeigen. Stabile Manifest-URLs für den Imager sind `https://github.com/kraeml/ros-pi-gen/releases/latest/download/headless-os-list.json` und `https://github.com/kraeml/ros-pi-gen/releases/latest/download/desktop-os-list.json`. `latest` darf nur auf ein vollständiges Produktionsrelease zeigen; Test-/Prereleases dürfen nicht als latest markiert werden. Im ersten GitHub-Imager-Test Redirect-Verhalten der Asset-URL prüfen.
+- S3-Image-Objekte liegen unter `<präfix>/releases/<version>/<Image-Dateiname>`. GitHub Releases enthalten beide kanonischen Images, beide variantenspezifischen Manifeste und eine Prüfsummendatei `SHA256SUMS` im `sha256sum`-Format mit beiden kanonischen Image-Dateinamen. Release-Datum und Version müssen aus demselben annotierten Tag stammen. Vor Veröffentlichung aktuelles GitHub-Assetgrößenlimit (derzeitige Erwartung: 2 GiB pro Asset; zum Umsetzungszeitpunkt verifizieren) und tatsächliche Größen aller Assets prüfen; bei Überschreitung stoppen und alternative Verteilung abstimmen.
 
-Anzeigename: `Roboter-OS <YYYY.MM.PATCH> (Headless)` oder `(Desktop)` entsprechend `VARIANT`.
+### `make package` und Manifest-Rendering
 
-- `YYYY.MM` folgt dem Veröffentlichungsmonat, `PATCH` beginnt bei `1` und wird pro Veröffentlichung fortgezählt.
-- Version wird bei der Veröffentlichung manuell angegeben, etwa `scripts/publish-s3.sh hetzner 2026.09.1`; kein automatischer Git-Tag-Import, solange dies nicht separat beschlossen ist.
-- Vor Generierung des Manifests das Raspberry-Pi-Imager-Repository-JSON-Schema verifizieren. Die vorhandene Workflow-Planung beschreibt V4 `os_list` als `imager-repository.json`; Dateiname, Schema und Imager-Kompatibilität im ersten echten Test verbindlich festlegen. Keine erfundenen Felder wie `version` hinzufügen.
-- Der tatsächliche Build-Artefaktname ist datumspräfixiert (`image_<Datum>-raspberrypi-trixie-custom-lite.img.xz`). Das Manifest muss exakt auf den paketierten und hochgeladenen Dateinamen zeigen. `VARIANT` wählt Headless oder Desktop; die Unterscheidung muss zuverlässig im Manifestnamen sichtbar sein.
-- Paketierung muss das Image eindeutig auswählen und Abbruch bei null oder mehreren passenden Build-Artefakten auslösen, statt stillschweigend das falsche Image zu verwenden.
-- SHA-256 für komprimiertes Download-Image und erforderliche entpackte Image-Prüfsumme aus dem echten Build-Artefakt erzeugen. Größen und URLs ebenfalls daraus ableiten.
-- `init_format` primär `cloudinit-rpi`; falls dies auf echter Hardware nicht funktioniert, kontrolliert auf `cloudinit` wechseln. Entscheidung im JSON-Erzeugungsskript dokumentieren.
-- Keine `.bmap` erzeugen, solange kein konkreter Bedarf beauftragt wurde.
-- Zum Testen soll auch ein docker getriebenes `rpi-imager-cli` herangezogen werden. Docker deshalb, da OS unabhängig und eine parallel Installation zu rpi-imager nicht möglich ist.
+`make package` wird in Etappe 1 umgesetzt und muss lokal sowie in CI identisch funktionieren:
 
-## Etappe 1: lokaler HTTP-Test
+1. Für Produktionspakete die Version ausschließlich aus dem annotierten Tag `image-YYYY.MM.PATCH` ableiten. Lokale Gate-1-Pakete ohne Release-Tag erhalten einen klar als nicht veröffentlichbar markierten Testnamen; sie dürfen nie in S3 oder GitHub Releases hochgeladen werden. Der Tagger-Zeitstempel in UTC ist `release_date`; Jahr/Monat müssen mit diesem UTC-Datum übereinstimmen, auch wenn der lokale Zeitpunkt noch im Vormonat lag. Lightweight-Tags (nicht annotiert) und ungültige Tags ablehnen. Der Paketierungsschritt prüft nur Tagformat und Paketkonsistenz; Wiederverwendung einer Version wird vom jeweiligen Publish-Adapter vor dem Upload geprüft. Genau eine angeforderte Variante aus dem tatsächlichen Build-Artefakt auswählen; bei null oder mehreren passenden Artefakten abbrechen. Der Buildname ist datumspräfixiert, z. B. `image_<Datum>-raspberrypi-trixie-custom-lite.img.xz`.
+2. Unter dem kanonischen variantenspezifischen Dateinamen paketieren. Beide Varianten werden separat paketiert; ein Produktionsrelease ist erst vollständig, wenn beide vorliegen.
+3. SHA-256 des komprimierten Images und des entpackten Images sowie Download-/Extraktgrößen aus dem echten Artefakt ermitteln. Das vollständige Release-Paket enthält `SHA256SUMS` im Standardformat von `sha256sum` mit beiden kanonischen Image-Dateinamen.
+4. Paketdaten/Prüfsummen einmalig erzeugen. Zielabhängige Manifeste erst mit einer expliziten Basis-URL rendern: lokal `http://127.0.0.1:8000/`; OMVs bestätigte Objektbasis für Gate-2-Testobjekte; Hetzners bestätigte öffentliche Objektbasis für Gate-3-Testobjekte beziehungsweise Produktionsobjekte; oder versionierte GitHub-Release-Asset-URL. Keine Basis-URL raten. Für lokale Gate-1-Paketierung ohne Release-Tag einen expliziten lokalen Teststatus verwenden; keine Produktionsversion oder -URL fingieren. Hashes und Größen werden einmal im Paket erzeugt; `publish-s3.sh <ziel> <paketverzeichnis>` liest Version und Veröffentlichungsstatus aus den Paketdaten und rendert das S3-Manifest. Für Status `test` schreibt es ausschließlich unter `ros-pi-gen-test/`; für Status `production` ausschließlich unter `ros-pi-gen/`. Unbekannte Statuswerte oder unpassende Präfixe führen vor Upload zum Abbruch. Der GitHub-Release-Adapter rendert die GitHub-Manifeste aus denselben Paketdaten.
+5. JSON syntaktisch prüfen und gegen eine gepinnte Raspberry-Pi-Imager-Repository-V4-Schemaquelle validieren. Vor Implementierung Schema und offizielle Geräteliste `os_list_imagingutility_v4.json` auf denselben festen rpi-imager-Commit pinnen; Validator in `make package` integrieren und `devices`-Tags dagegen prüfen. `python3 -m json.tool` ist nur eine zusätzliche Syntaxprüfung. Das Custom-Repository-Manifest nach dem gepinnten V4-Sublist-Schema erzeugen; insbesondere keinen `imager`-Katalogblock oder erfundene Felder übernehmen, sofern das gepinnte Schema diese nicht ausdrücklich verlangt.
+6. Im ersten echten Test Manifestname, Schema und Imager-Kompatibilität verbindlich bestätigen.
 
-Nur auf der Developer-Maschine testen; `127.0.0.1` ist ausschließlich von genau dieser Maschine erreichbar und kein LAN-Link.
+`rpi-imager-cli` ist nur ergänzend, bis Repository-Import mit konkreter gepinnter CLI-Version nachgewiesen ist.
 
-- HTTP-Server aus einem Verzeichnis starten, das Manifest und Image enthält, z. B. `python3 -m http.server 8000` im Paketverzeichnis.
-- Manifest-URL für diesen Test: `http://127.0.0.1:8000/os-list.json`; Image-URL darin muss ebenfalls lokal auflösbar sein.
-- Raspberry Pi Imager CLI auf derselben Maschine mit dieser Quelle testen. `curl` allein belegt nicht, dass der Imager Manifest und Image erfolgreich lädt.
-- JSON mit `python3 -m json.tool` validieren und SHA-256 des bereitgestellten Images mit dem Manifest vergleichen.
-- Rollback: Server mit Strg+C stoppen; keine dauerhaften Änderungen.
+Geräte sind arm64 Raspberry Pi 3/4/5. `devices`-Tags sollen nach Abgleich mit der gepinnten offiziellen Imager-Geräteliste exakt `pi3-64bit`, `pi4-64bit`, `pi5-64bit` sein; keine 32-bit-Tags. Icon und `capabilities` werden weggelassen. `init_format` primär `cloudinit-rpi`; nur bei nachgewiesenem Hardwareproblem kontrolliert auf `cloudinit` wechseln und im Generator dokumentieren. Keine `.bmap` erzeugen, solange kein konkreter Bedarf beauftragt wurde.
 
-→ Gate 1.
+### Ausschluss des temporären `04-user-data`
+
+`stage-custom/04-user-data` ist ein Test-Quickfix und darf in keinem für S3 oder GitHub vorgesehenen Image enthalten sein. Release-Build muss diese Stage vor dem Build deaktivieren. Vor Nutzung prüfen, dass die gepinnte pi-gen-Version die Sub-Stage-SKIP-Datei dafür tatsächlich auswertet; nicht ungeprüft annehmen. Das Image muss nach dem Build vor Paketierung geprüft werden: keine Quickfix-Seed-Datei, kein fest eingebauter Quickfix-Benutzer `robot` mit Passwort `robot`, keine aktivierte Passwort-SSH-Anmeldung und keine Betreiber-SSH-Schlüssel. Bei fehlgeschlagener Prüfung abbrechen; nachträgliches Löschen der Seed-Datei oder ein Imager-Wizard ersetzt die Prüfung nicht.
+
+## Etappe 1: lokaler HTTP-/Imager-Test
+
+Nur auf der Developer-Maschine. `127.0.0.1` ist ausschließlich von dieser Maschine erreichbar und kein LAN-Link. Etappe 1 implementiert bereits `make package` mit Manifest-Rendering und Variantenprüfung. Gate 1 muss außerdem verbindlich klären und dokumentieren, ob die eingesetzte Raspberry Pi Imager-Version das Repository und Image über reines HTTP akzeptiert.
+
+- `make package VARIANT=headless` oder `make package VARIANT=desktop` erzeugt Paketdaten und ein variantenspezifisches Image; lokaler Renderer erzeugt in einem Testverzeichnis ein S3-Format-Manifest `os-list.json` mit localhost-Basis-URL.
+- HTTP-Server aus einem Verzeichnis mit Manifest und Image starten, z. B. `python3 -m http.server 8000` im Paketverzeichnis. Manifest-URL: `http://127.0.0.1:8000/os-list.json`; Image-URL im Manifest muss ebenfalls lokal auflösbar sein.
+- Gate 1 erfordert den echten Raspberry Pi Imager auf derselben Maschine. Prüfen, ob die verwendete Imager-Version Repository und Image über HTTP akzeptiert; diesen Befund samt Version dokumentieren. `curl` oder CLI allein ist kein Abnahmenachweis.
+- JSON-Syntax und gepinntes Schema prüfen; bereitgestelltes Image herunterladen und SHA-256 gegen Manifest vergleichen.
+- Rollback: HTTP-Server mit Strg+C stoppen; keine dauerhaften Änderungen.
+
+→ Gate 1, danach OMV-Bucket-Anlage/-Upload nur nach Gate-2-Freigabe.
 
 ## Etappe 2: OMV/LAN-S3
 
-Ziel: Schülergeräte im Heim- Klassenzimmernetz können das Image auch ohne Internet herunterladen. Bucket und öffentliche Lesbarkeit sind derzeit nicht eingerichtet.
+Ziel: Schülergeräte im Heim- bzw. Klassenzimmernetz können Images ohne WAN-Internet abrufen. Der OMV-Bucket `ros-pi-gen-images` existiert nicht; anonymes Lesen ist nicht eingerichtet.
 
-- Profil `s3-intern` nur verwenden, nachdem Endpoint, Signaturregion und Zugriff erfolgreich geprüft wurden. Die derzeitige Profilkonfiguration ist nicht als korrekt/funktionsfähig bestätigt.
-- Erst nach Freigabe Bucket `ros-pi-gen-images` auf OMV anlegen und unter dem Präfix `ros-pi-gen/` veröffentlichen.
-- Provider- und Regionswerte aus dem Profil/OMV beziehen; keine Werte raten und keine lokale Profilkorrektur ohne Auftrag durchführen.
-- Image hochladen und Download/Prüfsumme prüfen, bevor das stabile Manifest aktualisiert wird.
-- JSON-URL, öffentliche HTTPS-Erreichbarkeit aus dem Klassenzimmernetz und Imager-Test prüfen.
-- Rollback: stabiles Manifest auf die zuvor veröffentlichte Version zurücksetzen. Vorherige Release-Objekte nicht automatisch löschen.
+- `publish-s3.sh <ziel> <paketverzeichnis>` wird in dieser Etappe implementiert; es prüft die Wiederverwendung der Version anhand der Zielobjekte vor dem Upload und weist Status/Präfix-Kombinationen strikt zurück. Profil `s3-intern` erst nach sicherer Prüfung von Endpoint, Region `eu-central-1`, Erreichbarkeit, S3-Kompatibilität und Berechtigungen verwenden.
+- Nach Gate-2-Freigabe Bucket `ros-pi-gen-images` erstellen und für diesen Test ausschließlich `ros-pi-gen-test/` verwenden; der Produktionspräfix `ros-pi-gen/` bleibt unangetastet. Public Read für den Testpräfix nur nach separater ausdrücklicher Freigabe mit OMV-Administration konfigurieren.
+- Testpakete nach `ros-pi-gen-test/releases/<version>/` hochladen und Download/Prüfsummen verifizieren; danach Test-Manifestkopien unter `ros-pi-gen-test/releases/<version>/<variant>-os-list.json` archivieren und die Test-Stabilmanifeste unter `ros-pi-gen-test/imager/<variant>/s3/os-list.json` zuletzt aktualisieren. Testmanifest-Dateinamen bleiben `os-list.json`; Testobjekte verändern keine Produktionspfade.
+- Anonyme HTTPS-Erreichbarkeit im Klassenzimmernetz, Manifest-JSON und Imager-Test prüfen.
+- Rollback: versionierte Manifestkopie der vorherigen Veröffentlichung wieder an den stabilen S3-Manifestpfad kopieren. Vorherige Releaseobjekte nicht löschen. Gibt es noch keine vorherige Manifestkopie, Veröffentlichung anhalten und Rollback-Entscheidung erfragen.
 
-→ Gate 2.
+→ Gate 2, danach Hetzner-Bucket-Anlage/-Upload nur nach Gate-3-Freigabe.
 
 ## Etappe 3: Hetzner/WAN-S3
 
-Ziel: öffentliche Verteilung über das Internet. Bucket `ros-pi-gen-images` ist neu; keine Objekte in anderen Buckets wie `kraeml-bayern` verwenden oder verändern.
+Ziel: öffentliche Verteilung über das Internet. Bucket `ros-pi-gen-images` ist neu; andere Buckets, insbesondere `kraeml-bayern`, nicht verwenden oder verändern. Gate-3-Testveröffentlichungen schreiben ausschließlich nach `ros-pi-gen-test/`; `ros-pi-gen/` bleibt unberührt.
 
 - Profil `hetzner-prod`, Endpoint `https://hel1.your-objectstorage.com`, Region `hel1`.
-- Bucket-Erstellung und notwendige Public-Read-Konfiguration erst nach ausdrücklicher Freigabe. Zuvor prüfen, ob die verwendeten Credentials Bucket-Erstellung erlauben; bestehende Policies nicht ersetzen.
-- Nur `ros-pi-gen/*` beschreiben. Keine Objekte löschen.
-- Image hochladen und öffentlich per HTTPS samt Prüfsumme verifizieren; das stabile Manifest erst danach aktualisieren.
-- JSON- und Image-URLs außerhalb des eigenen Netzes prüfen und den Imager-Test durchführen.
-- Rollback: Manifest auf vorherige Version zurücksetzen. Ein fehlgeschlagener Lauf kann ein nicht referenziertes Release-Objekt hinterlassen; solche Objekte nicht automatisch löschen. Gleichzeitige oder wiederholte Veröffentlichungen derselben Version verhindern oder sicher abbrechen.
+- Vor Bucket-Anlage prüfen, ob Credentials diese erlauben; Bucket-Anlage und nötige Public-Read-Konfiguration nur nach ausdrücklicher Freigabe. Keine bestehende Policy ersetzen.
+- Gate-3-Testpakete dürfen ausschließlich unter `ros-pi-gen-test/*` schreiben. Keine Produktionsobjekte beschreiben oder Objekte löschen.
+- `publish-s3.sh` muss Status `test` erzwingen und Version/Paketstatus vor Upload prüfen. Bei bereits vorhandenen Objekten unter `ros-pi-gen-test/releases/<version>/` sicher abbrechen.
+- Testpakete zuerst hochladen und öffentlich per HTTPS samt Prüfsumme prüfen. Danach versionierte Test-Manifestkopien unter `ros-pi-gen-test/releases/<version>/<variant>-os-list.json` archivieren und Test-Stabilmanifeste unter `ros-pi-gen-test/imager/<variant>/s3/os-list.json` zuletzt aktualisieren. Die öffentliche URL-Form muss vorher bestätigt sein.
+- URLs außerhalb des eigenen Netzes abrufen und Imager-Test durchführen. GitHub-Redirect und Assetgrößen ebenfalls vor Aktivierung der Release-Automatisierung prüfen.
+- Rollback S3: archivierte vorherige variantenspezifische Manifestkopie auf stabilen Pfad zurücksetzen. Gibt es noch keine vorherige Manifestkopie, anhalten und Rollback-Entscheidung erfragen. Verwaiste Releaseobjekte bleiben erhalten; nichts automatisch löschen.
 
-→ Gate 3.
+→ Gate 3, danach Anlage/Aktivierung des GitHub-Workflows nur nach Gate-4-Freigabe.
 
-## Etappe 4: portabler CI-Runner
+## Etappe 4: portabler Runner und GitHub-Adapter
 
-Erste Integration ist GitHub Actions auf `ubuntu-latest`; Build-/Test-/Paketierungs-/Uploadlogik bleibt jedoch in Make-Targets und lokalen Skripten, damit kein GitHub-spezifischer Pfad nötig ist.
+Die portable Logik bleibt in Make-Targets und versionierten Skripten. `make package` und S3-Publish müssen vor dieser Etappe lokal erprobt sein. Vor Aktivierung den bestehenden `GitHub-Image-Workflow.md` mit dieser Anweisung abgleichen; diese Anweisung ist maßgeblich.
 
-- Ergänze `make package` für lokales und CI-identisches Erzeugen von Manifest und Prüfsummen.
-- Ergänze `scripts/publish-s3.sh <ziel> <version>` für OMV und Hetzner. Zielkonfiguration über vorhandene AWS-CLI-Profile lokal und Secrets/Umgebungsvariablen im CI bereitstellen. Keine Credentials in Skriptargumenten, Logs oder Repositorydateien schreiben.
-- Der erste Workflow-Runner-Adapter ist GitHub Actions und veröffentlicht nur nach Hetzner; der OMV-Endpunkt ist LAN-only und wird nicht aus dem GitHub-Runner angesprochen. Diese Plattformwahl legt den Build- oder Publish-Ablauf nicht fest: dieselben versionierten Make-Targets und Skripte müssen auch mit Codeberg, GitLab oder einem lokalen Runner nutzbar sein.
-- Workflow ruft vorhandene Make-Targets und Skripte auf, mindestens: Submodule initialisieren, Abhängigkeiten für Lint/Test bereitstellen, Lint, Setup, Build, Test, Package, Hetzner-Publish.
-- CI muss die vorhandenen Voraussetzungen erfüllen: pi-gen-Submodul am gepinnten Commit, Docker und arm64/binfmt, ShellCheck, Testabhängigkeiten sowie ausreichender Speicherplatz. Runner-Disk-Cleanup und tatsächlichen Speicherbedarf beim ersten Lauf verifizieren.
-- Hetzner-Secrets im GitHub-Repository manuell bereitstellen: `HETZNER_ACCESS_KEY_ID`, `HETZNER_SECRET_ACCESS_KEY`. Entsprechende Secret-Referenzen dürfen im Workflow stehen; Secrets selbst werden nicht angelegt oder ausgelesen.
-- Derselbe portable Ablauf muss später auf Codeberg, GitLab und einem lokalen Runner verwendbar sein. Plattform-spezifisch bleiben nur Trigger, Secret-Injektion und Runner-Konfiguration.
-- GitHub Releases sind neben dem S3-Hetzner Veröffentlichungsziel und ebenso Ziel für den Imager-Download. Maßgeblich sind S3-Manifest und S3-Image.
-
-Kontrolle: Build, Tests und Paketierung erfolgreich; Image-Upload und Prüfsummenprüfung vor Manifest-Update; anschließend öffentliches Manifest und Image erreichbar, JSON korrekt und Imager-Test erfolgreich. Test-Trigger dürfen kein Produktionsmanifest aktualisieren. Testversionen beziehungsweise separater Testpfad müssen vor Workflow-Lauf festgelegt sein.
-
-→ Gate 4 gilt vor jedem Push/Tag, der den CI-Lauf oder einen echten Upload auslöst.
+- Implementiere GitHub Actions auf `ubuntu-latest` als dünnen Adapter: Submodule initialisieren, Abhängigkeiten bereitstellen, Lint, Setup, beide Varianten bauen und testen, paketieren, nach Hetzner veröffentlichen und GitHub Release anlegen.
+- Der Workflow-Trigger für Produktionsveröffentlichung ist ausschließlich ein annotierter Tag `image-YYYY.MM.PATCH`. Version und `release_date` werden aus dem Tag abgeleitet und validiert. Ein Tag mit ungültigem Format oder bereits veröffentlichter Version schlägt vor jedem Upload fehl.
+- Test-Trigger veröffentlichen nichts in der Produktionsautomatisierung. Gate-2/3-Testveröffentlichungen erfolgen ausschließlich manuell/lokal über `publish-s3.sh` unter `ros-pi-gen-test/`; sie dürfen keine Produktionsmanifeste oder GitHub-Releases erzeugen. Test-/Prereleases dürfen `latest` nicht verändern.
+- Beide Variantenimages zuerst nach S3 laden und per HTTPS samt Prüfsumme verifizieren. Danach ein GitHub-Draft-Release mit beiden kanonischen Images, beiden GitHub-Manifesten und `SHA256SUMS` als Assets anlegen. Im Draft nur Existenz und Größe der Assets über die authentifizierte GitHub-API prüfen; Draft-Assets nicht anonym abrufen. GitHub-Manifest- und Asset-URLs vor Veröffentlichung nicht anonym testen. Anschließend versionierte S3-Manifeste archivieren und stabile S3-Manifeste zuletzt aktualisieren. Erst nach erfolgreicher S3-Aktualisierung das GitHub-Release veröffentlichen, damit `latest` nicht vor dem maßgeblichen S3-Stand umspringt. Danach anonyme GitHub-Asset-URLs/Redirects und Imager-Zugriff prüfen. Scheitert die Prüfung nach Veröffentlichung, Lauf stoppen und Befund melden; Release nicht automatisch zurückziehen. Eine atomare Veröffentlichung über S3 und GitHub ist nicht möglich; Fehler können unreferenzierte Releaseobjekte oder zeitweise unterschiedliche stabile Ziele hinterlassen. Keine automatische Löschung.
+- GitHub-Secrets manuell bereitstellen: `HETZNER_ACCESS_KEY_ID`, `HETZNER_SECRET_ACCESS_KEY`. Workflow darf nur Referenzen enthalten; Secrets selbst werden nicht angelegt, gelesen oder geloggt. Lokale Veröffentlichung nutzt AWS-CLI-Profile.
+- CI-Voraussetzungen: pi-gen-Submodul am gepinnten Commit, Docker und arm64/binfmt, ShellCheck, Testabhängigkeiten und ausreichender Speicher. Disk-Cleanup und tatsächlichen Speicherbedarf beim ersten Lauf prüfen.
+- Derselbe Ablauf muss später auf Codeberg, GitLab und einem lokalen Runner nutzbar sein; plattformspezifisch bleiben Trigger, Secret-Injektion, Runner-Setup und Release-Adapter. OMV wird nicht aus GitHub Actions angesprochen.
+- Vor jedem echten Tag/Push Gate 4 einhalten. Keine Tags pushen, die unbeabsichtigt Build oder Upload auslösen.
 
 ## Durchgehende Regeln
 
-- Bei unklaren Endpoints, Regionen, Bucket-Berechtigungen, JSON-Schema oder Varianten anhalten und nachfragen; keine Werte raten.
-- Image zuerst hochladen und verifizieren, Manifest zuletzt aktualisieren.
-- Alte Release-Objekte nicht automatisch löschen.
-- Veröffentlichungsskripte lokal und im Workflow identisch ausführbar halten.
-- Prüfsummen belegen Integrität, nicht Herkunft. Signaturen (Sigstore/GPG) sind nicht Teil dieser Etappen.
-- Vor jedem Push/Tag mit echtem CI- oder Upload-Effekt explizite Freigabe einholen.
-- Arbeiten mit git flow features
+- Bei unklaren Endpoint-, Regions-, Bucket-, Policy-, Schema-, URL- oder Variantenangaben anhalten und nachfragen; keine Werte raten.
+- Images zuerst hochladen und verifizieren, versionierte Manifestkopien unveränderlich archivieren und stabile Manifestobjekte erst nach erfolgreichem Image-Upload und erfolgreicher Archivierung zuletzt aktualisieren.
+- Keine alten Releaseobjekte automatisch löschen. Prüfsummen belegen Integrität, nicht Herkunft; Signaturen sind nicht Teil dieser Etappen.
+- GitHub Releases sind ein zusätzliches Downloadziel; S3-Image und S3-Manifest bleiben maßgeblich.
