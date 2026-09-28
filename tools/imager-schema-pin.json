@@ -1,0 +1,12 @@
+{
+  "rpi_imager_commit": "b6b68c7d933b3226b1000760b5bd07eb6ee1e45a",
+  "schema_path": "doc/json-schema/os-list-schema.json",
+  "schema_sha256": "c3e323aa297e9ef3f386f522abb4497db5eb9a1ca5f7f3c7a3b1f9a75862ac85",
+  "device_catalog_url": "https://downloads.raspberrypi.org/os_list_imagingutility_v4.json",
+  "device_catalog_sha256": "b898a13c78d13288feeb09eb940ac16bf285acd33181e9fc591be2f22a13c4cf",
+  "required_device_tags": [
+    "pi3-64bit",
+    "pi4-64bit",
+    "pi5-64bit"
+  ]
+}

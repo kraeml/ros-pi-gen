@@ -1,0 +1,420 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import lzma
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parent.parent
+PIN_PATH = ROOT / "tools" / "imager-schema-pin.json"
+PIN = json.loads(PIN_PATH.read_text())
+VARIANTS = {"headless": "Headless", "desktop": "Desktop"}
+IMAGE_PATTERN = re.compile(r"^image_(\d{4}-\d{2}-\d{2})-raspberrypi-trixie-custom-lite\.img\.xz$")
+TAG_PATTERN = re.compile(r"^image-(\d{4})\.(\d{2})\.(\d+)(-test)?$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+CACHE = ROOT / ".cache" / "imager" / PIN["rpi_imager_commit"]
+
+
+class PackageError(RuntimeError):
+    pass
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def fetch_pinned(url: str, target: Path, expected: str) -> Path:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file() and sha256_file(target) == expected:
+        return target
+    temporary = target.with_suffix(target.suffix + ".part")
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "ros-pi-gen-package/1"})
+        with urllib.request.urlopen(request, timeout=45) as response, temporary.open("wb") as output:
+            shutil.copyfileobj(response, output)
+        actual = sha256_file(temporary)
+        if actual != expected:
+            raise PackageError(f"SHA-256 der gepinnten Quelle stimmt nicht: {url} ({actual})")
+        temporary.replace(target)
+    except (OSError, urllib.error.URLError) as error:
+        temporary.unlink(missing_ok=True)
+        raise PackageError(f"Gepinnte Imager-Quelle nicht abrufbar: {url}: {error}") from error
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
+def pinned_sources() -> tuple[Path, Path]:
+    commit = PIN["rpi_imager_commit"]
+    schema = fetch_pinned(
+        f"https://raw.githubusercontent.com/raspberrypi/rpi-imager/{commit}/{PIN['schema_path']}",
+        CACHE / "os-list-schema.json",
+        PIN["schema_sha256"],
+    )
+    catalog = fetch_pinned(
+        PIN["device_catalog_url"],
+        CACHE / "os_list_imagingutility_v4.json",
+        PIN["device_catalog_sha256"],
+    )
+    return schema, catalog
+
+
+def validate_manifest(manifest: dict, schema_path: Path, catalog_path: Path) -> None:
+    try:
+        import jsonschema
+    except ImportError as error:
+        raise PackageError("jsonschema fehlt; bitte make venv ausführen") from error
+    schema = json.loads(schema_path.read_text())
+    jsonschema.Draft7Validator.check_schema(schema)
+    errors = sorted(jsonschema.Draft7Validator(schema).iter_errors(manifest), key=lambda item: list(map(str, item.path)))
+    if errors:
+        details = "; ".join(f"{'/'.join(map(str, item.path))}: {item.message}" for item in errors[:5])
+        raise PackageError(f"Manifest verletzt das gepinnte Imager-V4-Schema: {details}")
+    if "imager" in manifest:
+        raise PackageError("Sublist darf keinen imager-Katalogblock enthalten")
+    if not isinstance(manifest.get("os_list"), list) or len(manifest["os_list"]) != 1:
+        raise PackageError("Manifest muss genau einen OS-Eintrag enthalten")
+    catalog = json.loads(catalog_path.read_text())
+    catalog_tags = {
+        tag
+        for device in catalog.get("imager", {}).get("devices", [])
+        for tag in device.get("tags", [])
+    }
+    expected = PIN["required_device_tags"]
+    if any(tag not in catalog_tags for tag in expected):
+        raise PackageError("Gepinnter offizieller Imager-Katalog enthält nicht alle benötigten Gerätetags")
+    entry = manifest["os_list"][0]
+    variant = "desktop" if entry.get("name", "").endswith("(Desktop)") else "headless"
+    filename = entry.get("url", "").split("/")[-1]
+    if not filename.startswith("roboter-os-") or not filename.endswith(("-headless.img.xz", "-desktop.img.xz")):
+        raise PackageError("Manifest-URL verwendet keinen kanonischen Image-Dateinamen")
+    if entry.get("devices") != expected:
+        raise PackageError(f"Gerätetags müssen exakt {expected} sein")
+    if "capabilities" in entry:
+        raise PackageError("OS capabilities sind für dieses Manifest nicht freigegeben")
+    if "image_download_sha256" in entry and not SHA256_PATTERN.fullmatch(entry["image_download_sha256"]):
+        raise PackageError("image_download_sha256 ist kein SHA-256-Hash")
+    if not SHA256_PATTERN.fullmatch(entry["extract_sha256"]):
+        raise PackageError("extract_sha256 ist kein SHA-256-Hash")
+    if entry["extract_size"] <= 0 or entry["image_download_size"] <= 0:
+        raise PackageError("Image-Größen müssen positiv sein")
+    if not isinstance(entry.get("icon"), str) or not entry["icon"]:
+        raise PackageError("Manifest-Icon muss eine nichtleere URL oder einen Pfad sein")
+    parsed_icon_url = urlsplit(entry["icon"])
+    if parsed_icon_url.scheme not in {"http", "https"} or not parsed_icon_url.netloc:
+        raise PackageError("Manifest-Icon muss eine HTTP(S)-URL sein")
+    if entry.get("init_format") != "cloudinit-rpi":
+        raise PackageError("init_format muss cloudinit-rpi sein")
+    parsed_image_url = urlsplit(entry.get("url", ""))
+    if parsed_image_url.scheme not in {"http", "https"} or not parsed_image_url.netloc:
+        raise PackageError("Image-URL muss eine HTTP(S)-URL sein")
+
+
+def build_info(image: Path, deploy_dir: Path, variant: str) -> tuple[Path, dt.date]:
+    matches = [path for path in deploy_dir.iterdir() if path.is_file() and IMAGE_PATTERN.fullmatch(path.name)]
+    if len(matches) != 1:
+        raise PackageError(f"Erwartete genau ein Build-Artefakt in {deploy_dir}, gefunden: {len(matches)}")
+    artifact = matches[0]
+    if artifact.resolve() != image.resolve():
+        raise PackageError("Ausgewähltes Artefakt stimmt nicht mit dem eindeutigen Build-Artefakt überein")
+    match = IMAGE_PATTERN.fullmatch(artifact.name)
+    if not match:
+        raise PackageError(f"Ungültiger pi-gen-Artefaktname: {artifact.name}")
+    build_date = dt.date.fromisoformat(match.group(1))
+    logs = [deploy_dir / "build-docker.log", deploy_dir / "build.log"]
+    log = next((path for path in logs if path.is_file()), None)
+    if log is None:
+        raise PackageError("Build-Log fehlt; Varianten-Build kann nicht verifiziert werden")
+    text = log.read_text(errors="replace")
+    actual = {
+        item
+        for item in VARIANTS
+        if f"/stage-custom/06-variant-{item}" in text or f"/stage2/06-variant-{item}" in text
+    }
+    if actual != {variant}:
+        raise PackageError(f"Build-Log belegt nicht exakt VARIANT={variant}: {sorted(actual)}")
+    return artifact, build_date
+
+
+def current_tag() -> tuple[str | None, dt.date | None, str | None]:
+    proc = subprocess.run(
+        ["git", "tag", "--points-at", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+    )
+    tags = [tag for tag in proc.stdout.splitlines() if tag.startswith("image-")]
+    if len(tags) > 1:
+        raise PackageError(f"Mehrere Image-Tags zeigen auf HEAD: {tags}")
+    all_tags = proc.stdout.splitlines()
+    non_image_tags = [tag for tag in all_tags if tag and not tag.startswith("image-")]
+    if non_image_tags:
+        raise PackageError(f"Unpassender zusätzlicher Tag auf HEAD: {non_image_tags}")
+    if not tags:
+        return None, None, None
+    tag = tags[0]
+    match = TAG_PATTERN.fullmatch(tag)
+    kind = subprocess.run(
+        ["git", "cat-file", "-t", f"refs/tags/{tag}"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    if kind != "tag":
+        raise PackageError(f"Release-Tag {tag} ist nicht annotiert")
+    if not match:
+        raise PackageError(f"Ungültiges Imager-CalVer-Tag: {tag}")
+    timestamp = subprocess.run(
+        ["git", "for-each-ref", "--format=%(taggerdate:unix)", f"refs/tags/{tag}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if not timestamp:
+        raise PackageError(f"Tagger-Zeitstempel fehlt: {tag}")
+    tag_date = dt.datetime.fromtimestamp(int(timestamp), dt.timezone.utc).date()
+    year, month = int(match.group(1)), int(match.group(2))
+    if not 1 <= month <= 12 or int(match.group(3)) < 1:
+        raise PackageError(f"Ungültige CalVer-Komponenten: {tag}")
+    if (year, month) != (tag_date.year, tag_date.month):
+        raise PackageError(f"Tagmonat passt nicht zum UTC-Tagger-Datum {tag_date.isoformat()}: {tag}")
+    return tag, tag_date, tag
+
+
+def audit_release_image(image: Path) -> None:
+    sys.path.insert(0, str(ROOT / "tests"))
+    from helpers import imageio
+
+    previous_cache = os.environ.get("PIGEN_TEST_CACHE")
+    with tempfile.TemporaryDirectory(prefix="ros-pi-gen-package-") as temporary:
+        os.environ["PIGEN_TEST_CACHE"] = str(Path(temporary) / "cache")
+        try:
+            pack = imageio.prepare(image)
+            rootfs = imageio.stage_rootfs(pack.root_img, pack.cache / "rootfs")
+            boot_files = [path for path in pack.boot_dir.iterdir() if path.is_file()]
+            seed_source = ROOT / "stage-custom" / "04-user-data" / "files" / "user-data"
+            quickfix_seed = seed_source.read_text() if seed_source.is_file() else ""
+            user_data = pack.boot_dir / "user-data"
+            if user_data.is_file():
+                content = user_data.read_text(errors="replace")
+                if quickfix_seed and content == quickfix_seed:
+                    raise PackageError("Quickfix-Seed user-data ist im Image enthalten")
+                if "plain_text_passwd: robot" in content or re.search(r"^\s*ssh_pwauth:\s*true\s*$", content, re.I | re.M):
+                    raise PackageError("Quickfix-Passwort oder Passwort-SSH ist im Image enthalten")
+            passwd = rootfs / "etc/passwd"
+            if passwd.is_file() and any(line.startswith("robot:") for line in passwd.read_text(errors="replace").splitlines()):
+                raise PackageError("Quickfix-Benutzer robot ist im Image vorhanden")
+            if quickfix_seed:
+                keys = [line.strip().strip('"') for line in quickfix_seed.splitlines() if line.lstrip().startswith("- \"")]
+                for key in keys:
+                    if any(key in path.read_text(errors="replace") for path in boot_files):
+                        raise PackageError("Betreiber-SSH-Schlüssel aus dem Quickfix-Seed sind im Boot-Image enthalten")
+                    for directory in (rootfs / "root" / ".ssh", rootfs / "home"):
+                        if directory.is_dir():
+                            for path in directory.rglob("authorized_keys"):
+                                if key in path.read_text(errors="replace"):
+                                    raise PackageError("Betreiber-SSH-Schlüssel aus dem Quickfix-Seed sind im RootFS enthalten")
+            ssh_configs = list((rootfs / "etc/ssh").glob("sshd_config*")) if (rootfs / "etc/ssh").is_dir() else []
+            ssh_configs.extend((rootfs / "etc/ssh/sshd_config.d").glob("*.conf") if (rootfs / "etc/ssh/sshd_config.d").is_dir() else [])
+            for path in ssh_configs:
+                if path.is_file() and re.search(r"^\s*PasswordAuthentication\s+yes\s*(?:#.*)?$", path.read_text(errors="replace"), re.I | re.M):
+                    raise PackageError(f"Passwort-SSH ist aktiviert: {path.relative_to(rootfs)}")
+        finally:
+            if previous_cache is None:
+                os.environ.pop("PIGEN_TEST_CACHE", None)
+            else:
+                os.environ["PIGEN_TEST_CACHE"] = previous_cache
+
+
+def render_manifest(metadata: dict, base_url: str) -> dict:
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.query or parsed.fragment:
+        raise PackageError("BASE_URL muss eine explizite HTTP(S)-Basis-URL ohne Query oder Fragment sein")
+    base = base_url.rstrip("/") + "/"
+    variant = metadata["variant"]
+    status = metadata["status"]
+    if status not in {"local-test", "test", "production"}:
+        raise PackageError(f"Unbekannter Paketstatus: {status}")
+    expected_image_name = f"roboter-os-{metadata['version'] or 'local-test'}-{variant}.img.xz"
+    if metadata.get("image_file") != expected_image_name:
+        raise PackageError("Image-Dateiname entspricht nicht der kanonischen Variante/Version")
+    if metadata.get("rpi_imager_commit") != PIN["rpi_imager_commit"]:
+        raise PackageError("Paketdaten wurden mit einem anderen Imager-Schema-Pin erzeugt")
+    if status == "local-test" and metadata.get("version") is not None:
+        raise PackageError("local-test-Pakete dürfen keine Releaseversion enthalten")
+    if status in {"test", "production"}:
+        version_match = TAG_PATTERN.fullmatch(metadata.get("version", ""))
+        if not version_match or (status == "test") != bool(version_match.group(4)):
+            raise PackageError("Test-/Produktionspakete benötigen eine zum Status passende Tagversion")
+    if status == "local-test":
+        display_name = f"Roboter-OS (Lokaler Test, nicht veröffentlichbar) ({VARIANTS[variant]})"
+    else:
+        marker = " (Test)" if status == "test" else ""
+        display_name = f"Roboter-OS {metadata['version']}{marker} ({VARIANTS[variant]})"
+    icon_path = ROOT / "assets" / "roboter-os.svg"
+    if not icon_path.is_file():
+        raise PackageError("Imager-Icon fehlt: assets/roboter-os.svg")
+    entry = {
+        "name": display_name,
+        "description": f"ros-pi-gen {VARIANTS[variant]}-Image",
+        "icon": base + "roboter-os.svg",
+        "url": base + metadata["image_file"],
+        "release_date": metadata["release_date"],
+        "image_download_size": metadata["image_download_size"],
+        "image_download_sha256": metadata["image_download_sha256"],
+        "extract_size": metadata["extract_size"],
+        "extract_sha256": metadata["extract_sha256"],
+        "devices": PIN["required_device_tags"],
+        "init_format": "cloudinit-rpi",
+    }
+    return {"os_list": [entry]}
+
+
+def write_manifest(package_dir: Path, base_url: str) -> Path:
+    metadata_path = package_dir / "package.json"
+    metadata = json.loads(metadata_path.read_text())
+    status = metadata.get("status")
+    if status not in {"local-test", "test", "production"}:
+        raise PackageError(f"Unbekannter Paketstatus: {status}")
+    variant = metadata.get("variant")
+    if variant not in VARIANTS:
+        raise PackageError(f"Unbekannte Paketvariante: {variant}")
+    expected_image_name = f"roboter-os-{metadata.get('version') or 'local-test'}-{variant}.img.xz"
+    if metadata.get("image_file") != expected_image_name:
+        raise PackageError("Image-Dateiname entspricht nicht der kanonischen Variante/Version")
+    if metadata.get("rpi_imager_commit") != PIN["rpi_imager_commit"]:
+        raise PackageError("Paketdaten wurden mit einem anderen Imager-Schema-Pin erzeugt")
+    if status == "local-test" and metadata.get("version") is not None:
+        raise PackageError("local-test-Pakete dürfen keine Releaseversion enthalten")
+    if status in {"test", "production"}:
+        version_match = TAG_PATTERN.fullmatch(metadata.get("version", ""))
+        if not version_match or (status == "test") != bool(version_match.group(4)):
+            raise PackageError("Test-/Produktionspakete benötigen eine zum Status passende Tagversion")
+    sums_path = package_dir / "SHA256SUMS"
+    expected_sums = f"{metadata.get('image_download_sha256')}  {expected_image_name}\n"
+    if not sums_path.is_file() or sums_path.read_text() != expected_sums:
+        raise PackageError("SHA256SUMS fehlt oder stimmt nicht mit den Paketdaten überein")
+    schema_path, catalog_path = pinned_sources()
+    manifest = render_manifest(metadata, base_url)
+    validate_manifest(manifest, schema_path, catalog_path)
+    icon_source = ROOT / "assets" / "roboter-os.svg"
+    if not icon_source.is_file():
+        raise PackageError("Imager-Icon fehlt: assets/roboter-os.svg")
+    shutil.copyfile(icon_source, package_dir / "roboter-os.svg")
+    output = package_dir / "os-list.json"
+    output.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    subprocess.run([sys.executable, "-m", "json.tool", str(output)], check=True, stdout=subprocess.DEVNULL)
+    image_path = package_dir / metadata["image_file"]
+    if image_path.is_file() and sha256_file(image_path) != metadata["image_download_sha256"]:
+        raise PackageError("Komprimiertes Image stimmt nicht mit package.json überein")
+    sums_path = package_dir / "SHA256SUMS"
+    if sums_path.is_file():
+        expected_sums = f"{metadata['image_download_sha256']}  {metadata['image_file']}\n"
+        if sums_path.read_text() != expected_sums:
+            raise PackageError("SHA256SUMS stimmt nicht mit den Paketdaten überein")
+    return output
+
+
+def package_image(variant: str, deploy_dir: Path, output_dir: Path, base_url: str, release_build: bool) -> None:
+    if variant not in VARIANTS:
+        raise PackageError("VARIANT muss headless oder desktop sein")
+    deploy_dir = deploy_dir.resolve()
+    candidates = [path for path in deploy_dir.iterdir() if path.is_file() and IMAGE_PATTERN.fullmatch(path.name)]
+    if len(candidates) != 1:
+        raise PackageError(f"Erwartete genau ein Build-Artefakt in {deploy_dir}, gefunden: {len(candidates)}")
+    artifact, build_date = build_info(candidates[0], deploy_dir, variant)
+    tag, tag_date, version = current_tag()
+    if release_build and not tag:
+        raise PackageError("RELEASE_BUILD=1 benötigt ein annotiertes image-YYYY.MM.PATCH[-test]-Tag")
+    if tag and not version:
+        raise PackageError("Paketstatus oder Version fehlt am Image-Tag")
+    if tag and not release_build:
+        raise PackageError("Ein image-Tag darf ausschließlich mit RELEASE_BUILD=1 paketiert werden")
+    if tag:
+        test_tag = tag.endswith("-test")
+        status = "test" if test_tag else "production"
+        release_date = tag_date.isoformat()
+    else:
+        status = "local-test"
+        release_date = build_date.isoformat()
+    stage_skip = ROOT / "stage-custom" / "04-user-data" / "SKIP"
+    if release_build and not stage_skip.is_file():
+        raise PackageError("Release-Build ist nicht durch 04-user-data/SKIP abgesichert; make build RELEASE_BUILD=1 erforderlich")
+    if release_build:
+        audit_release_image(artifact)
+    if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
+        raise PackageError(f"Paketverzeichnis ist nicht leer oder kein Verzeichnis: {output_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    image_name = f"roboter-os-{version or 'local-test'}-{variant}.img.xz"
+    output_image = output_dir / image_name
+    shutil.copyfile(artifact, output_image)
+    extracted_digest = hashlib.sha256()
+    extracted_size = 0
+    try:
+        with lzma.open(artifact, "rb") as source:
+            for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
+                extracted_digest.update(chunk)
+                extracted_size += len(chunk)
+    except (OSError, lzma.LZMAError):
+        output_image.unlink(missing_ok=True)
+        raise
+    metadata = {
+        "schema_version": 1,
+        "status": status,
+        "version": version,
+        "variant": variant,
+        "release_date": release_date,
+        "source_artifact": artifact.name,
+        "image_file": image_name,
+        "image_download_size": output_image.stat().st_size,
+        "image_download_sha256": sha256_file(output_image),
+        "extract_size": extracted_size,
+        "extract_sha256": extracted_digest.hexdigest(),
+        "rpi_imager_commit": PIN["rpi_imager_commit"],
+    }
+    (output_dir / "package.json").write_text(json.dumps(metadata, indent=2) + "\n")
+    sums = output_dir / "SHA256SUMS"
+    sums.write_text(f"{metadata['image_download_sha256']}  {image_name}\n")
+    try:
+        write_manifest(output_dir, base_url)
+    except Exception:
+        output_image.unlink(missing_ok=True)
+        (output_dir / "package.json").unlink(missing_ok=True)
+        (output_dir / "roboter-os.svg").unlink(missing_ok=True)
+        (output_dir / "os-list.json").unlink(missing_ok=True)
+        sums.unlink(missing_ok=True)
+        raise
+    print(f"Paket erstellt: {output_dir}")
+    print(f"Status: {status}; Variante: {variant}; Image: {image_name}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("variant")
+    parser.add_argument("deploy_dir", type=Path)
+    parser.add_argument("output_dir", type=Path)
+    parser.add_argument("base_url")
+    parser.add_argument("release_build", choices=("0", "1"))
+    args = parser.parse_args()
+    try:
+        package_image(args.variant, args.deploy_dir, args.output_dir, args.base_url, args.release_build == "1")
+    except (PackageError, OSError, subprocess.CalledProcessError, json.JSONDecodeError, lzma.LZMAError) as error:
+        print(f"Paketierung fehlgeschlagen: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

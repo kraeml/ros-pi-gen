@@ -9,10 +9,12 @@
 #   make build ENGINE=native          # nativer Build ohne Docker
 #   make setup MODE=overlay           # Legacy: Overlay-cp in pi-gen/stage2
 #   make test                         # Testinfra (Gruppe Q) gegen deploy/
+#   make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/
 #   make ci                           # venv lint setup build test
 #
 # Variablen (über Env oder Kommandozeile): MODE, VARIANT, ENGINE,
-# CONTINUE, PRESERVE_CONTAINER, CLEAN, SKIP_IMAGES_BUILD, APT_PROXY
+# CONTINUE, PRESERVE_CONTAINER, CLEAN, SKIP_IMAGES_BUILD, APT_PROXY,
+# RELEASE_BUILD, BASE_URL, PACKAGE_DIR
 # (letzte: pi-gens SKIP_IMAGES-Mechanismus für schnelleren Iterationslauf,
 # siehe README, „Entwicklung: schnelle Iteration“).
 
@@ -30,6 +32,9 @@ VENV       := $(REPO_ROOT)/.venv
 MODE     ?= stage-custom
 VARIANT  ?= headless
 ENGINE   ?= docker
+RELEASE_BUILD ?= 0
+BASE_URL ?=
+PACKAGE_DIR ?= $(REPO_ROOT)/package/$(VARIANT)
 SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schnelle Iteration")
 
 # --- VM-Build (robotics-lab-vm-Submodul, Details: README „Build in der VM") --
@@ -67,7 +72,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test package ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -82,6 +87,7 @@ help:
 	@echo "                                CONTINUE=1 Weiterbau im Container (überspringt Stale-Guard),"
 	@echo "                                SKIP_IMAGES_BUILD=1 Iteration ohne Image-Export)"
 	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/ — Volltestlauf"
+	@echo "  make package                  Imager-Paket (BASE_URL explizit setzen)"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
@@ -94,7 +100,7 @@ help:
 	@echo "  make vm-artifacts             deploy/ aus der VM holen (nach deploy/vm/)"
 	@echo "  make vm-halt|vm-destroy       VM anhalten / löschen · make vm-ci = ganze Kette"
 	@echo
-	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) SKIP_IMAGES_BUILD=$(SKIP_IMAGES_BUILD)"
+	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) SKIP_IMAGES_BUILD=$(SKIP_IMAGES_BUILD) RELEASE_BUILD=$(RELEASE_BUILD) BASE_URL=$(BASE_URL) PACKAGE_DIR=$(PACKAGE_DIR)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren).
 # Stamp-Datei statt bin/python als Target: touch folgt dem venv-Symlink zum
@@ -109,8 +115,9 @@ venv: $(VENV)/.deps.stamp
 
 # --- lint -------------------------------------------------------------------
 lint: venv guard-pigen
-	@shellcheck $(SHELL_FILES)
-	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_hostname_ssid.py -q
+	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py
+	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh
+	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_hostname_ssid.py tests/test_package_image.py -q
 
 # --- setup ------------------------------------------------------------------
 # Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs
@@ -165,6 +172,7 @@ clean-variant-skips:
 build: guard-pigen guard-variant guard-container
 ifeq ($(ENGINE),docker)
 	@mkdir -p $(WORK_DIR) $(DEPLOY_DIR)
+	@if [ "$(RELEASE_BUILD)" = "1" ]; then touch $(STAGE_DIR)/04-user-data/SKIP; else rm -f $(STAGE_DIR)/04-user-data/SKIP; fi
 	@rm -f $(STAGE_DIR)/SKIP_IMAGES
 	@if [ -n "$(SKIP_IMAGES_BUILD)" ]; then touch $(STAGE_DIR)/SKIP_IMAGES; fi
 	@CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
@@ -172,6 +180,7 @@ ifeq ($(ENGINE),docker)
 	  PIGEN_DOCKER_OPTS='$(PIGEN_DOCKER_OPTS)' \
 	  tools/build-docker.sh
 else ifeq ($(ENGINE),native)
+	@if [ "$(RELEASE_BUILD)" = "1" ]; then touch $(STAGE_DIR)/04-user-data/SKIP; else rm -f $(STAGE_DIR)/04-user-data/SKIP; fi
 	cd $(PIGEN_DIR) && sudo env \
 	  APT_PROXY='$(APT_PROXY)' \
 	  STAGE_LIST="$(PIGEN_DIR)/stage0 $(PIGEN_DIR)/stage1 $(PIGEN_DIR)/stage2 $(STAGE_DIR)" \
@@ -186,6 +195,10 @@ endif
 # --- test -------------------------------------------------------------------
 test: venv
 	$(VENV)/bin/python -m pytest tests $(TEST_ARGS)
+
+package: venv
+	@test -n "$(BASE_URL)" || { echo "BASE_URL erforderlich, z. B. http://127.0.0.1:8000/" >&2; exit 1; }
+	@$(REPO_ROOT)/tools/package-image.sh "$(VARIANT)" "$(DEPLOY_DIR)" "$(PACKAGE_DIR)" "$(BASE_URL)" "$(RELEASE_BUILD)"
 
 # --- ci (Pipeline-Kette; Stufen wie GitHub-Image-Workflow.md, § 3) ----------
 ci: venv lint setup build test

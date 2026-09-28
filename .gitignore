@@ -7,6 +7,8 @@ __pycache__/
 # nativ via WORK_DIR/DEPLOY_DIR)
 /work/
 /deploy/
+/package/
+/.cache/
 
 # Varianten-Umschalter (make VARIANT=… — make setup setzt sie zurück)
 stage-custom/06-variant-headless/SKIP

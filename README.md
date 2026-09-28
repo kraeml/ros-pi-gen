@@ -95,8 +95,17 @@ make lint      # shellcheck + Overlay-Tests (ohne Docker/Image)
 make setup     # pi-gen @ Pin prüfen, SKIP_IMAGES setzen, Variante schalten
 make build     # Docker-Build; deploy/ + build-docker.log landen in ros-pi-gen/deploy/
 make test      # Testinfra (Gruppe Q) gegen das frisch gebaute Image
+make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/
 make ci        # alles nacheinander: venv lint setup build test
 ```
+
+Für den lokalen Raspberry-Pi-Imager-Test zuerst das Paket erzeugen, dann im Paketverzeichnis einen HTTP-Server starten:
+
+```bash
+cd package/headless && python3 -m http.server 8000
+```
+
+Repository-URL: `http://127.0.0.1:8000/os-list.json`. Image und das schemaerforderliche `roboter-os.svg` werden daneben abgelegt. Ohne Release-Tag erhalten Pakete den Status `local-test` und sind ausdrücklich nicht veröffentlichbar. Für getaggte Release-Builds deaktiviert `make build RELEASE_BUILD=1` die Quickfix-Stage; die Paketierung prüft danach Seed, Benutzer, SSH-Passwörter und Betreiber-Schlüssel. Die gepinnten Imager-V4-Quellen werden bei Bedarf nach `.cache/imager/` geladen und per SHA-256 geprüft. Da die gepinnte V4-Schemaquelle `icon` für OS-Einträge verlangt, ist das Icon im Manifest erforderlich.
 
 Falls ein APT-Proxy benötigt wird, gib ihn als vollständige URL mit Schema
 und Port an; die IP-Adresse allein reicht nicht. Beispiel für apt-cacher-ng:
