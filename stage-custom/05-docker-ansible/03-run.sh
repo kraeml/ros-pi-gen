@@ -1,8 +1,6 @@
 #!/bin/bash -e
-# Docker-Dienst aktivieren und ersten Benutzer in die docker-Gruppe aufnehmen;
-# ${FIRST_USER_NAME} expandiert build.sh-seitig (Default 'pi'). Der erste
-# Benutzer wird erst beim ersten Boot angelegt (Setup-Assistent) – der
-# usermod greift dann nicht; siehe README.md (Erster Benutzer).
+# Docker-Dienst aktivieren und ggf. bereits vorhandenen Build-Benutzer
+# aufnehmen. Cloud-init setzt die Docker-Gruppe für den First-Boot-Benutzer.
 
 on_chroot << EOF
 systemctl enable docker.service

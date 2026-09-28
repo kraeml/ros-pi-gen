@@ -3,8 +3,8 @@
 # Wird vom NM-Dispatcher (90-accesspopup-portal) nur während aktivem AP
 # geladen und beim AP-Stop vollständig wieder entfernt.
 # Prioritäten < 0 greifen VOR den NetworkManager-shared-Regeln (nm-shared-*)
-# und dem regulären Firewall-Setup -> AP-Clients haben kein Internet, kein
-# SSH, keinen Docker-/ROS-Zugriff; nur DHCP/DNS/Portal/mDNS erlaubt.
+# und dem regulären Firewall-Setup -> AP-Clients haben kein Internet und
+# keinen Docker-/ROS-Zugriff; SSH zum Pi ist für die Ersteinrichtung erlaubt.
 
 table ip accesspopup {
     chain prerouting {
@@ -17,7 +17,8 @@ table ip accesspopup {
         iifname "wlan0" ip saddr 192.168.50.0/24 udp dport 53 accept comment "AP: DNS"
         iifname "wlan0" ip saddr 192.168.50.0/24 tcp dport { 80, 8052 } accept comment "AP: Portal"
         iifname "wlan0" ip saddr 192.168.50.0/24 udp dport 5353 accept comment "AP: mDNS"
-        iifname "wlan0" drop comment "AP: kein SSH/Docker/ROS/lokale Dienste"
+        iifname "wlan0" ip saddr 192.168.50.0/24 tcp dport 22 accept comment "AP: SSH zum Pi"
+        iifname "wlan0" drop comment "AP: kein Docker/ROS/lokale Dienste"
     }
     chain forward {
         type filter hook forward priority -150; policy accept;

@@ -1,0 +1,11 @@
+#cloud-config
+users:
+  - name: robot
+    groups: [adm, audio, cdrom, dialout, docker, games, gpio, i2c, input, lpadmin, netdev, plugdev, render, spi, sudo, users, video]
+    shell: /bin/bash
+    plain_text_passwd: robot
+    lock_passwd: false
+    ssh_authorized_keys:
+      - "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBJ53ezOgH0Cuh32wibNIayxm7OCyA1Z1yDh5XfuV3kbF+ohn7jSdFhmkenItrU8wYiunncIEHZzYScy5ri36hTQ9hapS7SQDB4Dh1A5KLk6SbRWlaNbHnbm0sgf3UA947A== michl@michl-laptop"
+      - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3mLC19SsuUEwcexynPnzhBh0cY6CBByCBzboIK7APAa9itrwCFri1UaSZUXZI3KfWVROiaOtEOKbRiEvJ5kiaXFKqFXGRFnPQW1TtO0oP3iXfMNBc6gECyWObIZvEbGs8bR4186GwYy3Gp4ESqKDetYN9Mouv137UbtZVfhysCb78T5R/4j4C3Z8KCPiJPxI5YoUVgnonhDdwjG/qwTRURc3RdifrlelHeKuP3ONoIga5hIDYHSK7fvdCsVaJJ7oGdGOEcaXyNCxQZ+rtHxVqBI1hojNwxMhwlAlbNl1afBNIn+KWXvEFq8OBFueO080q/RSPf/Z9IaH06hmtItMT michl@michl-laptop"
+ssh_pwauth: true

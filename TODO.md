@@ -250,9 +250,10 @@ Status: **Umsetzungsplan v2.1 beschlossen** (Details, Architektur, Tests:
 **Umgesetzt:** temporärer AP, wenn kein bekanntes WLAN erreichbar; Konfiguration
 per AccessPopup-Web-UI (Port 8052, Dispatcher-gated – nur im AP-Fenster aktiv);
 Captive-Portal-Erkennung via DNS-Wildcard + nft-Redirect 80→8052; AP-Clients
-per nft isoliert (kein Internet/SSH/Docker/ROS); SSID `<hostname>-AP` (Hostname
-via Pi-Imager = Geräteidentität – keine Etiketten, MAC nicht ablesbar;
-Fallback `Roboter-AP`); einheitliches AP-Passwort `Pi-WLAN-Setup-2026`;
+per nft isoliert (kein Internet/Docker/ROS, SSH zum Pi auf TCP/22 erlaubt); SSID
+`<hostname>-AP` (Hostname via Pi-Imager = Geräteidentität – keine Etiketten,
+MAC nicht ablesbar; Fallback `Roboter-AP`); einheitliches AP-Passwort
+`Pi-WLAN-Setup-2026`;
 `WPA_COUNTRY="${WPA_COUNTRY:-DE}"` in der config (Imager bleibt maßgeblich).
 AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 (`stage-custom/07-accesspopup/files/VENDORED.md`).
@@ -443,11 +444,14 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
 
 ## 4. Image-Inhalt / Architektur
 
-- [ ] First-User/SSH-Defaults: `FIRST_USER_PASS` +
-      `DISABLE_FIRST_BOOT_USER_RENAME=1` (+ `PUBKEY_SSH_FIRST_USER`) in der
-      config setzen, damit `usermod -aG docker`
-      (`05-docker-ansible/03-run.sh`) bereits im Build greift (siehe
-      README, „Erster Benutzer")
+- [x] Übergangs-First-User/SSH-Defaults: `stage-custom/04-user-data`
+      benennt für headless und desktop den pi-gen-Platzhalter per Cloud-init
+      in `robot` um, setzt das temporäre Passwort `robot`, hinterlegt die
+      Betreiber-SSH-Schlüssel und aktiviert Passwort-SSH. Das ersetzt den
+      Imager-Setup-Assistenten beim reinen `Use custom`-Quickfix; Netzwerk
+      bleibt beim AccessPopup. Beim JSON-Feature wieder entfernen und keine
+      festen Zugangsdaten ins Image übernehmen. Hardware-First-Boot/SSH-Test
+      mit frisch geschriebener Karte bleibt offen.
 
 - [ ] Ansible-Strategie: build-time (heute) vs. ansible-pull/cloud-init
       zur Laufzeit. Konkretes Beispiel aus rpi-robot-base prüfen: die
@@ -478,28 +482,34 @@ AccessPopup unverändert (kein Fork), vendor't + gepinnt: `ba6eff1…`
       eine bereits existierende Automatisierung wirkt
 
 - [ ] Imager-2.0-Kompatibilität des Custom-Images — **Grundlage ist geprüft
-      (2026-09-22, Image-Extrakt 20.09): Image-seitig erfüllt** — cloud-init
-      25.2-1~bpo13+1+rpt20 (5 Units aktiv), NoCloud (`99_raspberry-pi.cfg`,
-      `seedfrom file:///boot/firmware`), bootfs-Templates `user-data`/
-      `network-config`/`meta-data` (inert, nur Kommentare — immer an, da
-      pi-gen 74d08a3 `ENABLE_CLOUD_INIT=1` defaultet, build.sh:248; jetzt in
-      ros-pi-gen/config ausdrücklich gepinnt), netplan.io 1.1.2-7+rpt1 +
-      NM-Renderer, NetworkManager 1.52.1-1+rpt4, `cc_raspberry_pi` Modul
-      (ruft `raspi-config nonint` direkt — `raspi-config-vendor` nur für
-      Fremddistros nötig). **Userconf-Interplay geklärt:** die
-      `raspberry_pi_os`-Distro-Klasse legt den Imager-User via
-      `userconf-pi` an (Rename des pi-Platzhalters) und maskiert
-      `userconfig.service` — kein doppelter Setup-Assistent.
-      **Workflow offen:** Imager 2.x nimmt bei **Use custom** `init_format:
-      "none"` an ⇒ Customization (Hostname/Schul-WLAN/SSH) wird ausgelassen
-      (Beleg: rpi-imager `doc/os_customisation_formats.md`); Imager 1.x darf
-      gar nicht mehr (Bug: nimmt fälschlich `systemd` an ⇒ Customization
-      wirkungslos auf Trixie). Drei offene Schritte:
-      - [ ] Handgeschriebenes Repository-JSON/Manifest für unser Image
-            (`init_format: cloudinit` oder `cloudinit-rpi` — cloudinit-rpi
-            sollte auf der Basis funktionieren; gegen Imager 2.0.11.1
-            testen; `create_local_json.py` aus dem rpi-imager-Repo hilft
-            **nicht**, es matcht nur offizielle Image-Namen)
+       (2026-09-22, Image-Extrakt 20.09): Image-seitig erfüllt** — cloud-init
+       25.2-1~bpo13+1+rpt20 (5 Units aktiv), NoCloud (`99_raspberry-pi.cfg`,
+       `seedfrom file:///boot/firmware`), bootfs-Templates `network-config`/
+       `meta-data` plus aktive Quickfix-`user-data` aus `stage-custom/04-user-data`
+        (Nutzer `robot`, temporäres Passwort `robot`, SSH-Schlüssel und
+        Passwortanmeldung; gilt vorübergehend für headless und desktop), netplan.io 1.1.2-7+rpt1 +
+
+       NM-Renderer, NetworkManager 1.52.1-1+rpt4, `cc_raspberry_pi` Modul
+       (ruft `raspi-config nonint` direkt — `raspi-config-vendor` nur für
+       Fremddistros nötig). **Userconf-Interplay geklärt:** die
+       `raspberry_pi_os`-Distro-Klasse legt den Imager-User via
+       `userconf-pi` an (Rename des pi-Platzhalters) und maskiert
+       `userconfig.service` — kein doppelter Setup-Assistent. Die Image-Seed-Datei
+       ist nicht mit Imager-Eingaben zusammenzuführen; Imager kann sie beim
+       Schreiben ersetzen. Das JSON-Folgefeature muss feste Zugangsdaten aus
+       dem Image entfernen. **Workflow offen:** Imager 2.x nimmt bei **Use custom**
+       `init_format: "none"` an ⇒ Customization (Hostname/Schul-WLAN/SSH) wird
+       ausgelassen (Beleg: rpi-imager `doc/os_customisation_formats.md`);
+       Imager 1.x darf gar nicht mehr (Bug: nimmt fälschlich `systemd` an ⇒
+       Customization wirkungslos auf Trixie). Offener nächster Schritt:
+       - [ ] Handgeschriebenes Repository-JSON/Manifest für unser Image
+             (`init_format: cloudinit` oder `cloudinit-rpi` — cloudinit-rpi
+             sollte auf der Basis funktionieren; gegen Imager 2.0.11.1
+             testen; `create_local_json.py` aus dem rpi-imager-Repo hilft
+             **nicht**, es matcht nur offizielle Image-Namen). Dabei entfernen:
+             `04-user-data`, Quickfix-Anleitung und feste Zugangsdaten aus dem
+             Image; JSON-/Imager-Test mit tatsächlichem Wizard-Output.
+
       - [ ] Hardware-Tests B1/B2 (Testprotokoll) mit Imager ≥ 2.0.6 +
             Test-Manifest (Schul-WLAN-Workflow, WLAN-Anleitung); dabei
             regdom/network-config (`regulatory-domain`) vs. Build-Fallback

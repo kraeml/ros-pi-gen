@@ -85,7 +85,9 @@ dieselben Targets nutzt der geplante CI-Lauf
 listet alle Targets; die wichtigsten Variablen: `MODE`
 (`stage-custom`, Default | `overlay`, Legacy), `VARIANT` (`headless`,
 Default | `desktop`), `ENGINE` (`docker`, Default | `native`),
-`CONTINUE`/`PRESERVE_CONTAINER`/`CLEAN` (pi-gen-Flags).
+`CONTINUE`/`PRESERVE_CONTAINER`/`CLEAN` (pi-gen-Flags) und `APT_PROXY`
+(optional, vollständige URL mit Schema und Port; wird nur für den Build
+verwendet und nicht ins Image übernommen).
 
 ```bash
 make venv      # venv + Testabhängigkeiten (Datei-Abhängigkeit zu tests/requirements.txt)
@@ -94,6 +96,13 @@ make setup     # pi-gen @ Pin prüfen, SKIP_IMAGES setzen, Variante schalten
 make build     # Docker-Build; deploy/ + build-docker.log landen in ros-pi-gen/deploy/
 make test      # Testinfra (Gruppe Q) gegen das frisch gebaute Image
 make ci        # alles nacheinander: venv lint setup build test
+```
+
+Falls ein APT-Proxy benötigt wird, gib ihn als vollständige URL mit Schema
+und Port an; die IP-Adresse allein reicht nicht. Beispiel für apt-cacher-ng:
+
+```bash
+APT_PROXY=http://192.168.56.99:3142 make build
 ```
 
 Was `make setup` (Default `MODE=stage-custom`) tut:
@@ -150,7 +159,7 @@ cps, dirty Submodul-Tree) und rendert die config nach `pi-gen/config` um
 ```bash
 # was make setup MODE=overlay macht (manuell):
 git submodule update --init && git -C pi-gen checkout 74d08a3
-cp -r stage-custom/05-docker-ansible stage-custom/07-accesspopup pi-gen/stage2/
+cp -r stage-custom/04-user-data stage-custom/05-docker-ansible stage-custom/07-accesspopup pi-gen/stage2/
 cp -r stage-custom/06-variant-headless pi-gen/stage2/06-variant   # bzw. 06-variant-desktop
 sed 's@^export STAGE_LIST=.*@export STAGE_LIST="${BASE_DIR}/stage0 ${BASE_DIR}/stage1 ${BASE_DIR}/stage2"@' config > pi-gen/config
 echo "export PIGEN_VARIANT='headless'" >> pi-gen/config           # bzw. desktop
@@ -374,8 +383,11 @@ unauthentifizierte Oberfläche nicht erreichbar.
 
 **AP-Clients sind isoliert:** während der AP aktiv ist, lädt der Dispatcher
 eine nftables-Regelgruppe (Priorität vor NetworkManagers shared-NAT):
-AP-Clients dürfen nur DHCP, DNS, Portal (80/8052) und mDNS — kein Internet,
-kein SSH, kein Docker/ROS-Zugriff. Bei AP-Ende wird die Regelgruppe entfernt.
+AP-Clients dürfen DHCP, DNS, Portal (80/8052), mDNS und SSH (Port 22) zum Pi;
+Internet und Docker/ROS-Zugriff bleiben gesperrt. Der SSH-Zugang nutzt in der
+Übergangslösung den gemeinsamen Account `robot` / `robot` mit den hinterlegten
+SSH-Schlüsseln. Bei AP-Ende wird
+die Regelgruppe entfernt.
 
 **Betreiber-/Admin-Hinweise:**
 
@@ -407,8 +419,8 @@ Unter `tests/` automatisiert eine pytest-Suite die Gruppe Q des
 
 ```bash
 .venv/bin/python -m pytest tests     # oder: tests/run_tests.sh
-ssh pi@<ip> 'bash -s' < tests/tools/pi-smoke.sh        # Hardware-Lauf (Q6/Q8 SKIP ohne Root)
-ssh -t pi@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh # optional vollständig privilegiert
+ssh robot@<ip> 'bash -s' < tests/tools/pi-smoke.sh        # Hardware-Lauf (Q6/Q8 SKIP ohne Root)
+ssh -t robot@<ip> 'sudo bash -s' < tests/tools/pi-smoke.sh # optional vollständig privilegiert
 ```
 
 Details, Grenzen und die Begründung zum verworfenen QEMU-Kernel-Boot-Test:
@@ -526,6 +538,7 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 | `config` | pi-gen-Konfiguration (IMG_NAME, RELEASE=`trixie`, `STAGE_LIST`, `ENABLE_SSH`, Locale/Zeitzone) |
 | `pi-gen/` | git-Submodul (arm64-Branch, gepinnt `74d08a3`) — unverändert (siehe Einleitungsblock); Updates nur durch bewusste Pin-Änderung |
 | `stage-custom/` | eigenes Stage-Dir, hängt per `STAGE_LIST` hinter pi-gens stage2; enthält `prerun.sh` (copy_previous) + `EXPORT_IMAGE` (Export aus diesem Stage) |
+| `stage-custom/04-user-data/` | temporärer Cloud-init-Erststart: Benutzer `robot`, Passwort `robot` und zwei SSH-Schlüssel, gilt für headless und desktop |
 | `stage-custom/05-docker-ansible/` | Docker (offizielles docker.com-Repository, Suite `trixie`) + Ansible + Werkzeuge |
 | `stage-custom/06-variant-headless/` | Headless-Pakete (openssh-server, network-manager); wird per SKIP-Datei aktiviert (Default) |
 | `stage-custom/06-variant-desktop/` | Desktop-Pakete (xfce4, lightdm, xserver-xorg); `01-run.sh` aktiviert LightDM bedingungslos — Existenz der Sub-Stage = Schalter |
@@ -539,9 +552,9 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 ## Konventionen
 
 - **Nummerierung:** pi-gen liefert in `stage2/` bereits Sub-Stages `01-…`
-  bis `04-…`; die eigenen laufen in `stage-custom/` danach als `05-`,
-  `06-…` und `07-` (pi-gens Sub-Stage-Schleife sortiert je Stage-Dir
-  alphanumerisch — die Aufteilung auf zwei Dirs ändert an der
+  bis `04-…`; die eigenen laufen in `stage-custom/` danach ab `04-user-data`
+  und als `05-`, `06-…` und `07-` (pi-gens Sub-Stage-Schleife sortiert je
+  Stage-Dir alphanumerisch — die Aufteilung auf zwei Dirs ändert an der
   Ausführungsreihenfolge nichts).
 - **Kein `VARIANT` als Variablenname:** console-setup (`setupcon`) nutzt
   `VARIANT` als Konfig-Suffix im Chroot — der Build bricht sonst an
@@ -561,9 +574,24 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 
 ## Erster Benutzer
 
-pi-gen legt den ersten Benutzer (`FIRST_USER_NAME=pi`) standardmäßig erst
-**beim ersten Boot** an (Setup-Assistent). Der `usermod -aG docker` in
-`05-docker-ansible/03-run.sh` greift daher nur, wenn der Benutzer im Build
-existiert (`FIRST_USER_PASS` + `DISABLE_FIRST_BOOT_USER_RENAME=1` in der
-`config`) — ansonsten nach dem ersten Start manuell:
-`sudo usermod -aG docker <benutzer>`.
+Die Stage `04-user-data` läuft unmittelbar nach pi-gen-stage2 und
+überschreibt für beide Image-Varianten die
+Cloud-init-Datei auf der Boot-Partition. Beim ersten Start wird der
+pi-gen-Platzhalter auf den Benutzer `robot` umgestellt. Das vorübergehende
+Passwort lautet `robot`; zusätzlich werden die beiden angegebenen
+SSH-Schlüssel installiert. SSH-Passwortanmeldung bleibt eingeschaltet.
+SSH-Zugriff aus dem AccessPoint-WLAN ist auf TCP-Port 22 freigegeben. Das
+Klartextpasswort steht in der nur temporär genutzten Seed-Datei auf der
+Boot-Partition. Der Zugang ist eine Übergangslösung bis zum
+Imager-Repository-JSON und darf nicht an nicht vertrauenswürdigen Netzen
+eingesetzt werden. Imager kann beim Schreiben seine eigene `user-data`
+bereitstellen; die enthaltene Datei wird dann nicht zusammengeführt. Die
+gewünschte Konfiguration muss im Imager-Wizard gesetzt werden.
+
+Netzwerkdaten und Hostname werden von dieser Seed-Datei nicht gesetzt. Für
+Netzwerk ist der AccessPoint-Fallback (AccessPopup) zuständig. SSH ist bereits
+über `ENABLE_SSH=1` aktiviert.
+
+Die Cloud-init-Seed-Datei ordnet `robot` den Raspberry-Pi-OS-Standardgruppen
+sowie `docker` zu.
+Nach dem JSON-Feature soll das Image keine festen Zugangsdaten mehr enthalten.

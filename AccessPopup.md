@@ -22,12 +22,18 @@ AP-Fallback + Web-UI, umgesetzt).
   (network-manager, wpasupplicant, WLAN-Firmware) und zusätzlich in
   `06-variant/00-packages` (headless) enthalten
 - **cloud-init** wird von pi-gens `stage2/04-cloud-init` **immer** installiert
-  (`cloud-init` + `rpi-cloud-init-mods`), ist aber faktisch schlafend: ohne
-  `ENABLE_CLOUD_INIT=1` installiert die Stage keine
-  `user-data`/`meta-data`/`network-config` nach `/boot/firmware` → cloud-init
-  findet keine Datasource-Dateien und konfiguriert nichts
-  - Synergie: Raspberry-Pi-Imager-OS-Customization (WLAN vorkonfigurieren) schreibt
-    genau diese Dateien → cloud-init legt beim First Boot die NM-Profile an
+  (`cloud-init` + `rpi-cloud-init-mods`); die Stage kopiert
+  `user-data`/`meta-data`/`network-config` nach `/boot/firmware`. Ros-pi-gen
+  ersetzt danach vorübergehend `user-data` durch eine aktive Erstkonfiguration
+  für `robot` mit Passwort `robot`, hinterlegten SSH-Schlüsseln und
+  Passwort-SSH; Netzwerk bleibt unberührt.
+  Die AP-Firewall gibt dafür TCP-Port 22 zum Pi frei, sperrt sonstige Dienste.
+  - Raspberry-Pi-Imager-OS-Customization schreibt beim JSON-Repository eigene
+    Cloud-init-Dateien. Verlass dich nicht auf Zusammenführen mit der
+    eingebauten `user-data`; nach dem JSON-Feature wird dieser feste Zugang
+    aus dem Image entfernt.
+  - NetworkManager legt über Cloud-init bereitgestellte Profile beim First Boot
+    an.
 - **Randbedingung aus pi-gen:** ohne `WPA_COUNTRY` in der config schreibt
   `02-net-tweaks` `WirelessEnabled=false` nach `/var/lib/NetworkManager/`
   (WLAN-Radio ist ab First Boot soft-disabled) → Abhilfe: `WPA_COUNTRY='DE'` in
@@ -215,7 +221,7 @@ nft-Tabelle accesspopup            → AP-Clients isoliert (nur DHCP/DNS/Portal/
 ### 8.4 Firewall
 
 - Eigene nft-Tabelle mit Prioritäten **< 0** → greift vor NMs `nm-shared-*`-Regeln (NM shared aktiviert per Default NAT/Forward für AP-Clients)
-- Input auf wlan0: nur DHCP (67), DNS (53), Portal (80→Redirect, 8052), mDNS (5353) – **Drop für alles andere** (kein SSH/Docker/ROS vom AP)
+- Input auf wlan0: DHCP (67), DNS (53), Portal (80→Redirect, 8052), mDNS (5353) und SSH (TCP/22) zum Pi – **Drop für alles andere** (kein Docker/ROS vom AP)
 - Forward: komplettes Drop für wlan0 (kein Internet/Ethernet-Durchgriff); ip6-Tabelle analog
 - Regeln nur während AP aktiv (Dispatcher lädt/entlädt)
 
@@ -243,7 +249,7 @@ NM-Start, AP, Scan, Skriptlauf, Web-Units-enable.
 - **QEMU-Smoke:** Units enabled (`AccessPopup.timer`, `hostname-ssid.service`), Web-Units **disabled**, conf-Inhalt, `nft -c`-Syntax, Dispatcher-Rechte, First-Boot-SSID (Imager-Hostname → `roboter-07-AP`)
 - **Hardware A:** Boot ohne WLAN → SSID `<hostname>-AP` → Captive-Portal öffnet / Fallback `http://192.168.50.5:8052` → Heim-WLAN einrichten → AP verschwindet
 - **Hardware B:** Schul-WLAN via Imager + eigener Hostname → Heim-WLAN per Portal → beide Profile gleichzeitig gespeichert → automatischer Wechsel Schul↔Zuhause
-- **Hardware C:** falsches Passwort (neues Profil wird gelöscht, kein Fehlerloop), WLAN-Ausfall → AP nach ≤ 2 min, 2 Pis parallel → individuelle SSIDs, Web-UI **nicht** aus dem Heim-/Schul-LAN erreichbar, AP-Clients ohne Internet/SSH/Docker/ROS, Stromverlust während Profiländerung
+- **Hardware C:** falsches Passwort (neues Profil wird gelöscht, kein Fehlerloop), WLAN-Ausfall → AP nach ≤ 2 min, 2 Pis parallel → individuelle SSIDs, Web-UI **nicht** aus dem Heim-/Schul-LAN erreichbar, AP-Clients ohne Internet/Docker/ROS; SSH zum Pi auf TCP/22 erlaubt, Stromverlust während Profiländerung
 
 ### 8.7 Risiken / dokumentierte Grenzen
 
