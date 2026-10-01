@@ -23,6 +23,7 @@ def test_local_package_metadata_and_manifest(tmp_path, monkeypatch):
     metadata = {
         "status": "local-test",
         "version": None,
+        "tag": None,
         "variant": "headless",
         "release_date": "2026-09-01",
         "image_file": "roboter-os-local-test-headless.img.xz",

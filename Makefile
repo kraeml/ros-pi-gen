@@ -14,7 +14,10 @@
 #
 # Variablen (über Env oder Kommandozeile): MODE, VARIANT, ENGINE,
 # CONTINUE, PRESERVE_CONTAINER, CLEAN, SKIP_IMAGES_BUILD, APT_PROXY,
-# RELEASE_BUILD, BASE_URL, PACKAGE_DIR
+# RELEASE_BUILD, BASE_URL, PACKAGE_DIR, HEADLESS_PACKAGE_DIR,
+# RELEASE_PACKAGE_DIR, CLEAN_RELEASE_STAGE,
+# S3_PROFILE,
+# S3_ENDPOINT, S3_REGION, S3_PUBLIC_BASE_URL, DRY_RUN
 # (letzte: pi-gens SKIP_IMAGES-Mechanismus für schnelleren Iterationslauf,
 # siehe README, „Entwicklung: schnelle Iteration“).
 
@@ -35,6 +38,13 @@ ENGINE   ?= docker
 RELEASE_BUILD ?= 0
 BASE_URL ?=
 PACKAGE_DIR ?= $(REPO_ROOT)/package/$(VARIANT)
+HEADLESS_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-test
+RELEASE_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-release-test
+S3_PROFILE ?= s3-intern-admin
+S3_ENDPOINT ?= https://s3-intern.kraeml-bayern.de
+S3_REGION ?= eu-central-1
+S3_PUBLIC_BASE_URL ?= https://s3-intern.kraeml-bayern.de/ros-pi-gen-images
+DRY_RUN ?= 0
 SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schnelle Iteration")
 
 # --- VM-Build (robotics-lab-vm-Submodul, Details: README „Build in der VM") --
@@ -72,7 +82,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test package ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test package package-release publish-s3-test clean-release-stage ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -88,6 +98,9 @@ help:
 	@echo "                                SKIP_IMAGES_BUILD=1 Iteration ohne Image-Export)"
 	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/ — Volltestlauf"
 	@echo "  make package                  Imager-Paket (BASE_URL explizit setzen)"
+	@echo "  make clean-release-stage CLEAN_RELEASE_STAGE=1  bestätigten Stale-Stage-Cache entfernen"
+	@echo "  make package-release          Headless-Testpaket für Gate 2 vorbereiten"
+	@echo "  make publish-s3-test          Testpaket nach ros-pi-gen-test/ publizieren (nur nach Freigaben)"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
@@ -100,7 +113,7 @@ help:
 	@echo "  make vm-artifacts             deploy/ aus der VM holen (nach deploy/vm/)"
 	@echo "  make vm-halt|vm-destroy       VM anhalten / löschen · make vm-ci = ganze Kette"
 	@echo
-	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) SKIP_IMAGES_BUILD=$(SKIP_IMAGES_BUILD) RELEASE_BUILD=$(RELEASE_BUILD) BASE_URL=$(BASE_URL) PACKAGE_DIR=$(PACKAGE_DIR)"
+	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) SKIP_IMAGES_BUILD=$(SKIP_IMAGES_BUILD) RELEASE_BUILD=$(RELEASE_BUILD) BASE_URL=$(BASE_URL) PACKAGE_DIR=$(PACKAGE_DIR) RELEASE_PACKAGE_DIR=$(RELEASE_PACKAGE_DIR) S3_PROFILE=$(S3_PROFILE) S3_ENDPOINT=$(S3_ENDPOINT) S3_REGION=$(S3_REGION) S3_PUBLIC_BASE_URL=$(S3_PUBLIC_BASE_URL) DRY_RUN=$(DRY_RUN)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren).
 # Stamp-Datei statt bin/python als Target: touch folgt dem venv-Symlink zum
@@ -115,9 +128,9 @@ venv: $(VENV)/.deps.stamp
 
 # --- lint -------------------------------------------------------------------
 lint: venv guard-pigen
-	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py
-	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh
-	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_hostname_ssid.py tests/test_package_image.py -q
+	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py
+	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
+	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py -q
 
 # --- setup ------------------------------------------------------------------
 # Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs
@@ -199,6 +212,20 @@ test: venv
 package: venv
 	@test -n "$(BASE_URL)" || { echo "BASE_URL erforderlich, z. B. http://127.0.0.1:8000/" >&2; exit 1; }
 	@$(REPO_ROOT)/tools/package-image.sh "$(VARIANT)" "$(DEPLOY_DIR)" "$(PACKAGE_DIR)" "$(BASE_URL)" "$(RELEASE_BUILD)"
+
+clean-release-stage:
+	@test "$(CLEAN_RELEASE_STAGE)" = "1" || { echo "CLEAN_RELEASE_STAGE=1 muss den Cache-Pfad ausdrücklich bestätigen" >&2; exit 1; }
+	@docker ps -a --filter name=pigen_work --format '{{.Names}} {{.State}}' | awk '$$2=="running" {found=1} END {exit found}' || { echo "pigen_work läuft; Release-Stage kann nicht sicher entfernt werden" >&2; exit 1; }
+	@test ! -L "$(WORK_DIR)/raspberrypi-trixie-custom/stage-custom" || { echo "Stage-Cache ist ein Symlink; Abbruch" >&2; exit 1; }
+	@test -d "$(WORK_DIR)/raspberrypi-trixie-custom/stage-custom/rootfs" || { echo "Stage-Cache/RootFS fehlt; Abbruch" >&2; exit 1; }
+	@docker run --rm --volume $(WORK_DIR):/work pi-gen rm -rf /work/raspberrypi-trixie-custom/stage-custom
+
+package-release: venv
+	@$(VENV)/bin/python $(REPO_ROOT)/tools/merge_test_packages.py \
+	  "$(HEADLESS_PACKAGE_DIR)" "$(RELEASE_PACKAGE_DIR)"
+
+publish-s3-test: venv
+	@$(REPO_ROOT)/tools/publish-s3.sh "$(RELEASE_PACKAGE_DIR)" $(if $(filter 1,$(DRY_RUN)),--dry-run,)
 
 # --- ci (Pipeline-Kette; Stufen wie GitHub-Image-Workflow.md, § 3) ----------
 ci: venv lint setup build test
