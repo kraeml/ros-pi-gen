@@ -7,4 +7,10 @@ if [[ $# -ne 5 ]]; then
 fi
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-exec python3 "$SCRIPT_DIR/package_image.py" "$@"
+# package_image.py validate_manifest() benötigt jsonschema (venv-
+# Abhängigkeit, siehe tests/requirements.txt) -- Default auf die venv-
+# Python-Binary, die der Makefile-"venv"-Target anlegt (make package
+# hängt davon ab); PACKAGE_PYTHON erlaubt einen expliziten Override (z. B.
+# für einen Aufruf außerhalb von make).
+PYTHON=${PACKAGE_PYTHON:-"$SCRIPT_DIR/../.venv/bin/python"}
+exec "$PYTHON" "$SCRIPT_DIR/package_image.py" "$@"

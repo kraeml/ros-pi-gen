@@ -31,6 +31,7 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -87,6 +88,16 @@ def github_asset_paths(package_dir: Path, metadata: dict) -> dict[str, Path]:
     versionierten Release-Asset-Basis-URL, falls es im Paketverzeichnis
     noch nicht vorliegt.
 
+    Wird das Manifest neu gerendert, schreibt dies bewusst NICHT nach
+    `package_dir`, sondern in ein eigenes temporäres Verzeichnis: Image,
+    SHA256SUMS, Icon und os-list.json in `package_dir` müssen exakt dem
+    Dateisatz entsprechen, den publish_s3.validate_production_package()
+    erwartet (AGENTS.md-Reihenfolge: S3-Manifeste werden erst NACH dem
+    GitHub-Draft-Schritt veröffentlicht, mit demselben, unveränderten
+    Paketverzeichnis). Liegt das variantenspezifische Manifest bereits in
+    `package_dir` (z. B. ein bewusst vorab platziertes Testartefakt),
+    wird es unverändert von dort wiederverwendet statt neu gerendert.
+
     Das Icon wird bewusst als eigenständiges 4. GitHub-Asset mit
     hochgeladen (nicht nur auf S3): Das gepinnte Imager-V4-Schema verlangt
     pro Manifest-Eintrag ein Pflichtfeld 'icon' (HTTP(S)-URL,
@@ -95,9 +106,10 @@ def github_asset_paths(package_dir: Path, metadata: dict) -> dict[str, Path]:
     Downloadziel sein -- ein auf die S3-Icon-URL verweisendes
     GitHub-Manifest würde diese Unabhängigkeit unterlaufen.
     package_image.write_github_manifest() rendert "icon" bereits relativ
-    zur übergebenen Basis-URL (also als GitHub-Release-Asset-URL), die
-    Icon-Datei muss dafür nur unter demselben Dateinamen (roboter-os.svg)
-    tatsächlich mit hochgeladen werden.
+    zur übergebenen Basis-URL (also als GitHub-Release-Asset-URL); als
+    tatsächliches Icon-Asset wird dennoch die bereits im Paket
+    vorhandene roboter-os.svg hochgeladen (identischer Inhalt wie die vom
+    Renderer in sein eigenes Ausgabeverzeichnis kopierte Datei).
     """
     variant = metadata["variant"]
     version = metadata["version"]
@@ -113,10 +125,14 @@ def github_asset_paths(package_dir: Path, metadata: dict) -> dict[str, Path]:
         release_asset_base_url = (
             f"https://github.com/{REPO}/releases/download/image-{version}/"
         )
+        manifest_output_dir = Path(tempfile.mkdtemp(prefix="ros-pi-gen-github-manifest-"))
         try:
-            package_image.write_github_manifest(package_dir, release_asset_base_url)
+            package_image.write_github_manifest(
+                package_dir, release_asset_base_url, output_dir=manifest_output_dir
+            )
         except package_image.PackageError as error:
             raise GithubReleaseError(f"GitHub-Manifest konnte nicht gerendert werden: {error}") from error
+        manifest_path = manifest_output_dir / manifest_name
     sums_path = package_dir / "SHA256SUMS"
     if not sums_path.is_file():
         raise GithubReleaseError(f"SHA256SUMS fehlt im Paket: {sums_path}")

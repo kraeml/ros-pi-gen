@@ -77,6 +77,30 @@ def test_github_asset_paths_renders_manifest_if_missing(tmp_path):
     assert entry["icon"].startswith(f"https://github.com/{github_release.REPO}/releases/download/image-")
 
 
+def test_github_asset_paths_never_writes_into_package_dir(tmp_path):
+    """Regressionstest für die AGENTS.md-Reihenfolge (Etappe 4): der
+    GitHub-Draft-Schritt darf das S3-Produktionspaketverzeichnis nicht
+    verändern, da publish_s3.validate_production_package() danach exakt
+    denselben, ursprünglichen Dateisatz für den nachfolgenden
+    Manifest-Publish-Schritt erwartet. Würde github_asset_paths() das neu
+    gerenderte headless-os-list.json nach package_dir schreiben, schlägt
+    validate_production_package() wegen einer unerwarteten Zusatzdatei
+    fehl."""
+    package = tmp_path / "release"
+    metadata = make_production_package(package)
+    files_before = sorted(p.name for p in package.iterdir())
+    github_release.github_asset_paths(package, metadata)
+    files_after = sorted(p.name for p in package.iterdir())
+    assert files_after == files_before
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    import publish_s3
+
+    # validate_production_package() muss nach dem GitHub-Draft-Schritt
+    # weiterhin unverändert erfolgreich sein (derselbe Dateisatz).
+    assert publish_s3.validate_production_package(package) == metadata
+
+
 def test_github_asset_paths_reuses_existing_manifest(tmp_path):
     package = tmp_path / "release"
     metadata = make_production_package(package)
