@@ -1,5 +1,17 @@
 # GitHub-Image-Workflow: Planung (KI-Arbeitspapier)
 
+> **⚠️ Veraltet gegenüber [AGENTS.md](AGENTS.md) (Stand 2026-10-02):** Dieses
+> Dokument plant GitHub Releases noch als alleiniges Downloadziel ohne S3,
+> ohne die Gate-1–4-Struktur und ohne die inzwischen umgesetzten
+> Make-Targets (`package-release`, `publish-s3-test`, `S3_TARGET=omv|hetzner`
+> in `tools/publish_s3.py`). Die `devices`-Tags in § 5 (`["pi3","pi4","pi5"]`)
+> und `capabilities: ["rpi_connect"]` sind ebenfalls überholt — gepinnt sind
+> inzwischen `pi3-64bit`/`pi4-64bit`/`pi5-64bit` ohne `capabilities`
+> (`tools/imager-schema-pin.json`). Bei Widersprüchen ist **AGENTS.md
+> maßgeblich**. Eine vollständige Überarbeitung dieses Arbeitspapiers ist
+> ausstehend; bis dahin nur als historischer Erstentwurf lesen, nicht als
+> aktuelle Spezifikation.
+>
 > **Zweck dieses Dokuments:** Umsetzungsplan für einen automatisierten
 > GitHub-Actions-Workflow, der das Roboter-Image baut, testet und als
 > **Raspberry-Pi-Imager-2.0-Paket** (Image + Repository-JSON) bereitstellt.
