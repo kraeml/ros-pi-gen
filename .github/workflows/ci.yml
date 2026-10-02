@@ -28,14 +28,14 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       # make lint führt bereits arm64-Container-Tests aus
       # (test_hostname_ssid.py, debian:trixie), nicht erst make build —
       # ohne registrierten arm64-Interpreter scheitert das auf dem
       # amd64-Runner mit "exec format error".
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
       - run: make venv
       - run: make lint
 
@@ -43,7 +43,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -58,7 +58,7 @@ jobs:
           docker image prune -af || true
           df -h /
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
 
       - run: make venv
 
@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload build log (immer)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-docker-log
           path: deploy/build-docker.log
@@ -85,7 +85,7 @@ jobs:
 
       - name: Upload image (nur bei Erfolg)
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: headless-image
           path: deploy/image_*-raspberrypi-trixie-custom-lite.img.xz
