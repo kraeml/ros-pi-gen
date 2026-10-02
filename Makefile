@@ -104,7 +104,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check clean-release-stage ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production clean-release-stage ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -125,6 +125,7 @@ help:
 	@echo "  make package-production       Headless-only-Produktionspaket vorbereiten (Status production, kein -test-Tag)"
 	@echo "  make publish-s3-test S3_TARGET=omv|hetzner   Testpaket nach ros-pi-gen-test/ publizieren (nur nach Freigaben; Default omv)"
 	@echo "  make publish-s3-test-read-only-check S3_TARGET=omv|hetzner   Nur Lesezugriff pruefen, kein Upload"
+	@echo "  make publish-s3-production    Headless-only-Produktionspaket nach ros-pi-gen/ auf Hetzner (nur nach ROS_PI_GEN_PRODUCTION_WRITE_APPROVED=yes)"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
@@ -264,6 +265,16 @@ publish-s3-test: venv
 publish-s3-test-read-only-check: venv
 	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
 	  $(REPO_ROOT)/tools/publish-s3.sh --read-only-check --target $(S3_TARGET)
+
+# Produktions-Publish ist bewusst strikt auf --target hetzner verdrahtet
+# (kein S3_TARGET-Durchgriff): publish_s3.publish_production_package()
+# lehnt jedes andere Ziel bereits intern ab; das Target hier macht diese
+# Beschränkung zusätzlich auf Make-Ebene sichtbar und verhindert ein
+# versehentliches S3_TARGET=omv bei einem Produktions-Aufruf. Erfordert
+# zusätzlich ROS_PI_GEN_PRODUCTION_WRITE_APPROVED=yes (siehe tools/publish_s3.py).
+publish-s3-production: venv
+	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
+	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner $(if $(filter 1,$(DRY_RUN)),--dry-run,)
 
 # --- ci (Pipeline-Kette; Stufen wie GitHub-Image-Workflow.md, § 3) ----------
 ci: venv lint setup build test

@@ -155,7 +155,23 @@ def test_headless_merge_rejects_unknown_status(tmp_path):
         merge_test_packages.merge_headless_package(headless, tmp_path / "release")
 
 
-def test_publisher_source_is_headless_only_and_never_touches_production():
+def test_publisher_source_is_headless_only():
+    """Verifiziert weiterhin, dass es keinen generischen Desktop-/
+    Mehrvarianten-Pfad gibt (Headless-only-Übergangsregelung, AGENTS.md):
+    jedes Vorkommen von 'desktop' im Quelltext muss Teil einer
+    raise-PublishError-Schutzklausel sein, und es gibt keine Variantenschleife.
+
+    Dieser Test prüfte früher zusätzlich per reiner Textsuche, dass der
+    String '\"ros-pi-gen/\"' nirgends im Quelltext vorkommt — das war ein
+    Platzhalter dafür, dass der Produktionspräfix (noch) nicht erreichbar
+    war. Jetzt, wo publish_production_package() den Produktionspräfix
+    bewusst und kontrolliert nutzt, übernehmen die spezifischeren
+    Verhaltenstests unten (test_production_publish_is_hetzner_only,
+    test_omv_profile_can_never_reach_production_prefix,
+    test_production_write_requires_dedicated_approval_env) die eigentliche
+    Sicherheitsgarantie: nicht *dass* der Präfix im Code vorkommt, sondern
+    *dass* er nur über den vorgesehenen, abgesicherten Pfad erreichbar ist.
+    """
     source = (ROOT / "tools/publish_s3.py").read_text()
     lines = source.splitlines()
     desktop_indices = [i for i, line in enumerate(lines) if "desktop" in line]
@@ -166,8 +182,155 @@ def test_publisher_source_is_headless_only_and_never_touches_production():
             f"'desktop' darf nur in einer raise-PublishError-Schutzklausel vorkommen, nicht in Zeile {index + 1}"
         )
     assert "for variant in VARIANTS" not in source
-    assert '"ros-pi-gen/"' not in source
-    assert "ros-pi-gen/releases" not in source
+
+
+def test_production_publish_is_hetzner_only(tmp_path, monkeypatch):
+    """publish_production_package() darf ausschließlich mit dem Ziel
+    'hetzner' aufgerufen werden; 'omv' muss strukturell abgelehnt werden,
+    bevor überhaupt eine S3-Operation stattfinden könnte."""
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    with pytest.raises(publish_s3.PublishError, match="ausschließlich.*hetzner|hetzner.*ausschließlich"):
+        publish_s3.publish_production_package(
+            tmp_path / "release",
+            publish_s3.EXPECTED_TEST_PROFILE,
+            publish_s3.EXPECTED_ENDPOINT,
+            publish_s3.EXPECTED_REGION,
+            "https://example.invalid/bucket",
+        )
+
+
+def test_omv_profile_can_never_reach_production_prefix(tmp_path, monkeypatch):
+    """Selbst mit gesetzter Produktions-Freigabe-Env darf das OMV-Tripel
+    niemals zum Produktionspräfix schreiben — resolve_target() liefert für
+    das OMV-Tripel immer das Ziel 'omv', dessen eigener Freigabeschalter
+    (ROS_PI_GEN_GATE2_WRITE_APPROVED) für den Produktionspfad irrelevant
+    ist, und publish_production_package() erzwingt zusätzlich target=='hetzner'."""
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setenv(publish_s3.PRODUCTION_WRITE_APPROVAL_ENV, "yes")
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    with pytest.raises(publish_s3.PublishError, match="ausschließlich.*hetzner|hetzner.*ausschließlich"):
+        publish_s3.publish_production_package(
+            tmp_path / "release",
+            publish_s3.EXPECTED_TEST_PROFILE,
+            publish_s3.EXPECTED_ENDPOINT,
+            publish_s3.EXPECTED_REGION,
+            "https://example.invalid/bucket",
+        )
+
+
+def test_production_write_requires_dedicated_approval_env(tmp_path, monkeypatch):
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.delenv(publish_s3.PRODUCTION_WRITE_APPROVAL_ENV, raising=False)
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    with pytest.raises(publish_s3.PublishError, match="nicht ausdrücklich freigegeben"):
+        publish_s3.publish_production_package(
+            tmp_path / "release",
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "https://example.invalid/bucket",
+        )
+
+
+def test_hetzner_gate3_approval_does_not_authorize_production_write(tmp_path, monkeypatch):
+    """Die bestehende Gate-3-Testfreigabe darf den neuen, separaten
+    Produktions-Freigabeschalter nicht mit-aktivieren (AGENTS.md: eigenes
+    Gate pro Freigabeumfang)."""
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setenv("ROS_PI_GEN_GATE3_WRITE_APPROVED", "yes")
+    monkeypatch.delenv(publish_s3.PRODUCTION_WRITE_APPROVAL_ENV, raising=False)
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    with pytest.raises(publish_s3.PublishError, match="nicht ausdrücklich freigegeben"):
+        publish_s3.publish_production_package(
+            tmp_path / "release",
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "https://example.invalid/bucket",
+        )
+
+
+def test_production_publish_dry_run_never_contacts_aws(tmp_path, monkeypatch):
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: pytest.fail("dry-run invoked S3"))
+    monkeypatch.setattr(publish_s3.package_image, "pinned_sources", lambda: (tmp_path / "schema", tmp_path / "catalog"))
+    monkeypatch.setattr(publish_s3.package_image, "validate_manifest", lambda *args: None)
+    publish_s3.publish_production_package(
+        tmp_path / "release",
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+        "https://example.invalid/bucket",
+        dry_run=True,
+    )
+
+
+def test_production_publish_fails_closed_when_existing_objects_exist(tmp_path, monkeypatch):
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setenv(publish_s3.PRODUCTION_WRITE_APPROVAL_ENV, "yes")
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: ["ros-pi-gen/releases/old-object"])
+    with pytest.raises(publish_s3.PublishError, match="bereits Objekte"):
+        publish_s3.publish_production_package(
+            tmp_path / "release",
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "https://example.invalid/bucket",
+        )
+
+
+def test_version_scan_rejects_bare_production_root_prefix():
+    """Der bloße Produktionspräfix 'ros-pi-gen/' ohne konkrete
+    Versions-Unterebene ist nie erlaubt — keine bucketweite
+    Produktionslistung, nur die gezielte Wiederverwendungsprüfung einer
+    einzelnen Version (AGENTS.md)."""
+    with pytest.raises(publish_s3.PublishError, match="Versionsprüfung"):
+        publish_s3.list_version_objects(
+            "hetzner-prod", "https://hel1.your-objectstorage.com", "hel1", "ros-pi-gen/"
+        )
+
+
+def test_version_scan_accepts_production_release_subprefix(monkeypatch):
+    """Die konkrete Produktions-Versions-Unterebene
+    ('ros-pi-gen/releases/<version>/') ist für die Wiederverwendungs-
+    prüfung zulässig (analog zur bestehenden Test-Versions-Unterebene)."""
+    def fake_run(command, **kwargs):
+        return publish_s3.subprocess.CompletedProcess(command, 0, '{"KeyCount": 0}', "")
+
+    monkeypatch.setattr(publish_s3.subprocess, "run", fake_run)
+    result = publish_s3.list_version_objects(
+        "hetzner-prod", "https://hel1.your-objectstorage.com", "hel1", "ros-pi-gen/releases/2026.09.1/"
+    )
+    assert result == []
+
+
+def test_validate_production_package_rejects_test_suffix_version(tmp_path):
+    package = tmp_path / "release"
+    write_headless_package_files(package, version=TEST_VERSION, status="production")
+    with pytest.raises(publish_s3.PublishError, match="Produktions-Publish"):
+        publish_s3.validate_production_package(package)
+
+
+def test_validate_package_rejects_production_status(tmp_path):
+    package = tmp_path / "release"
+    write_headless_package_files(package, version=TEST_VERSION, status="production")
+    with pytest.raises(publish_s3.PublishError, match="Nur Paketstatus test"):
+        publish_s3.validate_package(package)
 
 
 def test_publish_package_rejects_local_status_and_partial_variants(tmp_path):

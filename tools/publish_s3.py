@@ -18,6 +18,12 @@ import package_image
 
 BUCKET = "ros-pi-gen-images"
 TEST_PREFIX = "ros-pi-gen-test"
+# Produktionspräfix (Etappe 4, AGENTS.md): ausschließlich über
+# publish_production_package() erreichbar, die zusätzlich zur
+# Freigabe-Env strukturell auf das Ziel 'hetzner' beschränkt ist — OMV
+# darf niemals Produktionsschreibrechte erhalten.
+PRODUCTION_PREFIX = "ros-pi-gen"
+PRODUCTION_WRITE_APPROVAL_ENV = "ROS_PI_GEN_PRODUCTION_WRITE_APPROVED"
 
 # Ziel-Allowlist: Profil+Endpoint+Region müssen als zusammengehöriges
 # Tripel auf genau einen Eintrag passen (kein freies Mischen, z. B. kein
@@ -49,6 +55,14 @@ EXPECTED_ENDPOINT = TARGETS["omv"]["endpoint"]
 EXPECTED_REGION = TARGETS["omv"]["region"]
 DEFAULT_PUBLIC_BASE_URL = TARGETS["omv"]["default_public_base_url"]
 VERSION_PATTERN = re.compile(r"^(\d{4})\.(\d{2})\.(\d+)-test$")
+# Produktionsversion: identisches CalVer-Schema wie VERSION_PATTERN, aber
+# ohne das -test-Suffix (analog zu package_image.PACKAGE_VERSION_PATTERN).
+PRODUCTION_VERSION_PATTERN = re.compile(r"^(\d{4})\.(\d{2})\.(\d+)$")
+# Erlaubtes Teilpräfix für die Produktions-Versions-Wiederverwendungs-
+# prüfung (list_version_objects). Bewusst NUR die konkrete Versions-
+# Unterebene, kein bloßes "ros-pi-gen/" — eine bucketweite Produktions-
+# Listung ist kein Bestandteil dieses Publish-Pfads.
+PRODUCTION_VERSION_SUBPREFIX_PATTERN = re.compile(r"^ros-pi-gen/releases/\d{4}\.\d{2}\.\d+/$")
 REQUIRED_PACKAGE_FILES = {
     "package.json",
     "SHA256SUMS",
@@ -101,7 +115,22 @@ def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_
     return result
 
 
-def validate_package(package_dir: Path) -> dict:
+def _validate_headless_package(
+    package_dir: Path,
+    *,
+    status: str,
+    version_pattern: re.Pattern,
+    error_prefix: str,
+) -> dict:
+    """Gemeinsame Validierungslogik für Headless-only-Release-Pakete, die
+    nach S3 veröffentlicht werden sollen — parametrisiert nach Status
+    (test/production) und dem dazu passenden Versions-Suffix-Muster.
+
+    `error_prefix` fließt nur in Fehlermeldungen ein (z. B. "Gate-2" vs.
+    "Produktions"), ändert aber keine Prüflogik: Beide Status durchlaufen
+    exakt dieselben strukturellen Checks (genau eine Headless-Variante,
+    kanonische Dateinamen, Schema-Validierung, Prüfsummen-Konsistenz).
+    """
     package_dir = package_dir.resolve()
     metadata_path = package_dir / "package.json"
     if not package_dir.is_dir() or not metadata_path.is_file():
@@ -111,30 +140,31 @@ def validate_package(package_dir: Path) -> dict:
     except json.JSONDecodeError as error:
         raise PublishError("package.json ist ungültig") from error
     version = metadata.get("version")
-    if not isinstance(version, str) or not VERSION_PATTERN.fullmatch(version):
-        raise PublishError("Gate-2-Publish verlangt eine annotierte Testversion image-YYYY.MM.PATCH-test")
-    status = metadata.get("status")
-    if status != "test":
-        raise PublishError("Nur Paketstatus test darf veröffentlicht werden")
+    if not isinstance(version, str) or not version_pattern.fullmatch(version):
+        raise PublishError(f"{error_prefix}-Publish verlangt eine annotierte Version zum passenden Versionsmuster")
+    actual_status = metadata.get("status")
+    if actual_status != status:
+        raise PublishError(f"Nur Paketstatus {status} darf über diesen Pfad veröffentlicht werden")
     date = metadata.get("release_date")
     try:
         import datetime as dt
         release_date = dt.date.fromisoformat(date)
     except (ValueError, TypeError) as error:
         raise PublishError("release_date ist kein ISO-Datum") from error
-    match = VERSION_PATTERN.fullmatch(version)
+    match = version_pattern.fullmatch(version)
     if (release_date.year, release_date.month) != (int(match.group(1)), int(match.group(2))):
-        raise PublishError("Test-Tagmonat stimmt nicht mit release_date überein")
+        raise PublishError(f"{error_prefix}-Tagmonat stimmt nicht mit release_date überein")
     if metadata.get("rpi_imager_commit") != package_image.PIN["rpi_imager_commit"]:
         raise PublishError("Paket hat einen unerwarteten Imager-Schema-Pin")
     if not isinstance(metadata.get("tag"), str) or metadata["tag"] != f"image-{version}":
-        raise PublishError("Paketversion und annotierter Test-Tag stimmen nicht überein")
+        raise PublishError(f"Paketversion und annotierter {error_prefix}-Tag stimmen nicht überein")
     if metadata.get("variant") != "headless":
-        raise PublishError("Gate-2-Ausnahme akzeptiert ausschließlich die Variante headless; Desktop bleibt bis zur erfolgreichen Desktop-Bereitstellung zurückgestellt")
+        raise PublishError(
+            f"{error_prefix}-Ausnahme akzeptiert ausschließlich die Variante headless; Desktop bleibt bis zur "
+            "erfolgreichen Desktop-Bereitstellung zurückgestellt"
+        )
     if metadata.get("schema_version") != 1:
-        raise PublishError("Unbekannte Test-Paketdatenversion")
-    if not isinstance(metadata.get("tag"), str) or metadata["tag"] != f"image-{version}":
-        raise PublishError("Headless-Paketversion passt nicht zum annotierten Test-Tag")
+        raise PublishError(f"Unbekannte {error_prefix}-Paketdatenversion")
     expected_names = {
         name.format(version=version)
         for name in REQUIRED_PACKAGE_FILES
@@ -152,7 +182,7 @@ def validate_package(package_dir: Path) -> dict:
         raise PublishError("Paketverzeichnis enthält Unterverzeichnisse oder nicht reguläre Dateien")
     package_files = {path.name for path in package_entries}
     if any(path.name.endswith("-desktop.img.xz") for path in package_entries):
-        raise PublishError("Gate-2-Ausnahme verbietet Desktop-Images im Headless-Paket")
+        raise PublishError(f"{error_prefix}-Ausnahme verbietet Desktop-Images im Headless-Paket")
     if package_files != static_package_files | expected_names:
         raise PublishError("Paketverzeichnis enthält fehlende oder nicht erwartete Dateien")
     if not isinstance(metadata.get("image_download_sha256"), str) or not package_image.SHA256_PATTERN.fullmatch(metadata["image_download_sha256"]):
@@ -164,7 +194,7 @@ def validate_package(package_dir: Path) -> dict:
     if not isinstance(metadata.get("extract_size"), int) or metadata["extract_size"] <= 0:
         raise PublishError("Headless-Paketdaten enthalten keine gültige Extraktgröße")
     if "desktop-os-list.json" in package_files or "headless-os-list.json" in package_files:
-        raise PublishError("Gate-2-Headless-Paket muss genau os-list.json enthalten")
+        raise PublishError(f"{error_prefix}-Headless-Paket muss genau os-list.json enthalten")
     checksum_entries = {}
     for line in (package_dir / "SHA256SUMS").read_text().splitlines():
         match_line = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
@@ -172,22 +202,16 @@ def validate_package(package_dir: Path) -> dict:
             raise PublishError("SHA256SUMS hat ungültige oder doppelte Zeilen")
         checksum_entries[match_line.group(2)] = match_line.group(1)
     if expected_names != {f"roboter-os-{version}-headless.img.xz"}:
-        raise PublishError("Gate-2-Paketmenge ist nicht exakt Headless-only")
-    if metadata.get("variant") != "headless":
-        raise PublishError("Gate-2-Ausnahme erlaubt nur Variante headless")
+        raise PublishError(f"{error_prefix}-Paketmenge ist nicht exakt Headless-only")
     if set(checksum_entries) != expected_names:
-        raise PublishError("Gate-2-SHA256SUMS muss genau das Headless-Image enthalten")
+        raise PublishError(f"{error_prefix}-SHA256SUMS muss genau das Headless-Image enthalten")
     if package_image.sha256_file(package_dir / "roboter-os.svg") != package_image.sha256_file(ROOT / "assets/roboter-os.svg"):
-        raise PublishError("Imager-Icon im Testpaket entspricht nicht dem gepinnten Projekt-Icon")
+        raise PublishError(f"Imager-Icon im {error_prefix}-Paket entspricht nicht dem gepinnten Projekt-Icon")
     schema_path, catalog_path = package_image.pinned_sources()
     variant = "headless"
     filename = f"roboter-os-{version}-{variant}.img.xz"
-    if metadata.get("tag") != f"image-{version}":
-        raise PublishError("Paket-Tag und Testversion stimmen nicht überein")
     if metadata.get("release_date") != release_date.isoformat():
         raise PublishError("Paketdaten verwenden ein anderes release_date")
-    if metadata.get("rpi_imager_commit") != package_image.PIN["rpi_imager_commit"]:
-        raise PublishError("Paketdaten verwenden einen abweichenden Imager-Schema-Pin")
     if metadata.get("image_file") != filename:
         raise PublishError("Paket enthält keinen kanonischen Headless-Dateinamen")
     image = package_dir / filename
@@ -202,7 +226,7 @@ def validate_package(package_dir: Path) -> dict:
     except (OSError, json.JSONDecodeError) as error:
         raise PublishError("Headless-Manifest fehlt oder ist ungültig") from error
     if "imager" in manifest or not isinstance(manifest.get("os_list"), list) or len(manifest["os_list"]) != 1:
-        raise PublishError("Gate-2-Headless-Manifest muss genau einen Eintrag enthalten")
+        raise PublishError(f"{error_prefix}-Headless-Manifest muss genau einen Eintrag enthalten")
     entry = manifest["os_list"][0]
     if entry.get("url", "").split("/")[-1] != filename:
         raise PublishError("Headless-Manifest verweist nicht auf das kanonische Image")
@@ -221,6 +245,27 @@ def validate_package(package_dir: Path) -> dict:
     return metadata
 
 
+def validate_package(package_dir: Path) -> dict:
+    """Validiert ein Gate-2/3-Testpaket (Status test, Version mit
+    -test-Suffix) vor dem Publish nach ros-pi-gen-test/."""
+    return _validate_headless_package(
+        package_dir, status="test", version_pattern=VERSION_PATTERN, error_prefix="Gate-2"
+    )
+
+
+def validate_production_package(package_dir: Path) -> dict:
+    """Validiert ein Headless-only-Produktionspaket (Status production,
+    Version ohne -test-Suffix) vor dem Publish nach ros-pi-gen/ (Etappe 4,
+    AGENTS.md Headless-only-Übergangsregelung). Identische Strukturprüfung
+    wie validate_package(), nur mit dem Produktions-Versionsmuster."""
+    return _validate_headless_package(
+        package_dir,
+        status="production",
+        version_pattern=PRODUCTION_VERSION_PATTERN,
+        error_prefix="Produktions",
+    )
+
+
 
 def destination_url(base_url: str, key: str) -> str:
     parsed = urlsplit(base_url)
@@ -230,8 +275,16 @@ def destination_url(base_url: str, key: str) -> str:
 
 
 def list_version_objects(profile: str, endpoint: str, region: str, prefix: str) -> list[str]:
-    if prefix != f"{TEST_PREFIX}/" and not re.fullmatch(r"ros-pi-gen-test/releases/\d{4}\.\d{2}\.\d+-test/", prefix):
-        raise PublishError("Versionsprüfung ist auf ros-pi-gen-test/ beschränkt")
+    allowed = (
+        prefix == f"{TEST_PREFIX}/"
+        or re.fullmatch(r"ros-pi-gen-test/releases/\d{4}\.\d{2}\.\d+-test/", prefix)
+        or PRODUCTION_VERSION_SUBPREFIX_PATTERN.fullmatch(prefix)
+    )
+    if not allowed:
+        raise PublishError(
+            f"Versionsprüfung ist auf {TEST_PREFIX}/ oder eine konkrete "
+            f"{PRODUCTION_PREFIX}/releases/<version>/-Unterebene beschränkt"
+        )
     response = run_aws(
         ["s3api", "list-objects-v2", "--bucket", BUCKET, "--prefix", prefix, "--output", "json", "--no-paginate"],
         profile,
@@ -399,6 +452,157 @@ def publish_test_package(
             raise PublishError("Stabiles Headless-Manifest kann nicht anonym gelesen oder stimmt nicht überein")
 
 
+def publish_production_package(
+    package_dir: Path,
+    profile: str,
+    endpoint: str,
+    region: str,
+    public_base_url: str,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Veröffentlicht ein Headless-only-Produktionspaket (Status
+    production) nach ros-pi-gen/ auf Hetzner (Etappe 4, AGENTS.md
+    Headless-only-Übergangsregelung).
+
+    Bewusst strukturell auf das Ziel 'hetzner' beschränkt — OMV darf
+    niemals Produktionsschreibrechte erhalten, unabhängig davon, ob dessen
+    eigener Gate-2-Freigabeschalter gesetzt ist. Nutzt einen eigenen
+    Freigabeschalter (PRODUCTION_WRITE_APPROVAL_ENV), damit eine für Gate 3
+    (Testveröffentlichung auf Hetzner) erteilte Freigabe niemals
+    automatisch auch einen Produktionsupload erlaubt.
+
+    Ablauf identisch zu publish_test_package() (Image zuerst, dann
+    versioniertes Manifest, dann stabiles Manifest — jeweils mit anonymer
+    HTTPS-Verifikation nach jedem Schritt), nur mit PRODUCTION_PREFIX statt
+    TEST_PREFIX und validate_production_package() statt validate_package().
+    """
+    target = resolve_target(profile, endpoint, region)
+    if target["name"] != "hetzner":
+        raise PublishError(
+            "Produktions-Publish ist ausschließlich für das Ziel hetzner zulässig "
+            f"(angefordert: {target['name']})"
+        )
+    if not dry_run and os.environ.get(PRODUCTION_WRITE_APPROVAL_ENV) != "yes":
+        raise PublishError(
+            "S3-Produktions-Schreibzugriff ist noch nicht ausdrücklich freigegeben "
+            f"({PRODUCTION_WRITE_APPROVAL_ENV}=yes erforderlich)"
+        )
+    metadata = validate_production_package(package_dir)
+    version = metadata["version"]
+    base = public_base_url.rstrip("/")
+    if not dry_run:
+        parsed_base = urlsplit(base)
+        if parsed_base.scheme != "https" or not parsed_base.netloc or parsed_base.query or parsed_base.fragment:
+            raise PublishError("Die bestätigte öffentliche HTTPS-Objektbasis ist zwingend erforderlich")
+    image_name = f"roboter-os-{version}-headless.img.xz"
+    image_key = f"{PRODUCTION_PREFIX}/releases/{version}/{image_name}"
+
+    schema_path, catalog_path = package_image.pinned_sources()
+    with tempfile.TemporaryDirectory(prefix="ros-pi-gen-production-publish-") as temporary:
+        temp_dir = Path(temporary)
+        manifest = json.loads((package_dir / "os-list.json").read_text())
+        entry = manifest["os_list"][0]
+        entry["url"] = (
+            f"https://validation.invalid/{image_key}"
+            if dry_run else destination_url(base, image_key)
+        )
+        entry["icon"] = (
+            f"https://validation.invalid/{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg"
+            if dry_run else destination_url(base, f"{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg")
+        )
+        package_image.validate_manifest(manifest, schema_path, catalog_path)
+        version_path = temp_dir / "os-list.json"
+        version_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+        stable_path = temp_dir / "stable-os-list.json"
+        stable_manifest = json.loads(json.dumps(manifest))
+        stable_path.write_text(json.dumps(stable_manifest, indent=2, ensure_ascii=False) + "\n")
+        objects = [] if dry_run else list_version_objects(
+            profile,
+            endpoint,
+            region,
+            f"{PRODUCTION_PREFIX}/releases/{version}/",
+        )
+        if objects:
+            raise PublishError(f"Version {version} enthält bereits Objekte unter {PRODUCTION_PREFIX}; nächste Version erforderlich")
+        if dry_run:
+            return
+        parsed_base = urlsplit(base)
+        if parsed_base.scheme != "https" or not parsed_base.netloc or parsed_base.query or parsed_base.fragment:
+            raise PublishError("Die bestätigte öffentliche HTTPS-Objektbasis ist zwingend erforderlich")
+        run_aws(
+            ["s3", "cp", str(package_dir / image_name), f"s3://{BUCKET}/{image_key}", "--no-progress"],
+            profile,
+            endpoint,
+            region,
+        )
+        remote_image = temp_dir / f"download-{image_name}"
+        run_aws(
+            ["s3", "cp", f"s3://{BUCKET}/{image_key}", str(remote_image), "--no-progress"],
+            profile,
+            endpoint,
+            region,
+        )
+        if package_image.sha256_file(remote_image) != metadata["image_download_sha256"]:
+            raise PublishError("Nach Upload geladene Prüfsumme stimmt für Headless nicht")
+        run_aws(
+            ["s3", "cp", str(package_dir / "roboter-os.svg"), f"s3://{BUCKET}/{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg", "--no-progress"],
+            profile,
+            endpoint,
+            region,
+        )
+        self_url = destination_url(base, image_key)
+        public_probe = subprocess.run(
+            ["curl", "--fail", "--silent", "--show-error", "--head", self_url],
+            capture_output=True,
+            text=True,
+        )
+        if public_probe.returncode:
+            raise PublishError(f"Anonymer HTTPS-Imagezugriff für Headless nicht bestätigt: {public_probe.stderr.strip()}")
+        version_key = f"{PRODUCTION_PREFIX}/releases/{version}/headless-os-list.json"
+        run_aws(
+            ["s3", "cp", str(version_path), f"s3://{BUCKET}/{version_key}", "--no-progress"],
+            profile,
+            endpoint,
+            region,
+        )
+        self_manifest_probe = subprocess.run(
+            ["curl", "--fail", "--silent", "--show-error", "--head", destination_url(base, version_key)],
+            capture_output=True,
+            text=True,
+        )
+        if self_manifest_probe.returncode:
+            raise PublishError(f"Anonymer HTTPS-Manifestzugriff für Headless nicht bestätigt: {self_manifest_probe.stderr.strip()}")
+        fetched_manifest = subprocess.run(
+            ["curl", "--fail", "--silent", "--show-error", destination_url(base, version_key)],
+            capture_output=True,
+            text=True,
+        )
+        if fetched_manifest.returncode or json.loads(fetched_manifest.stdout) != json.loads(version_path.read_text()):
+            raise PublishError("Versioniertes Headless-Manifest kann nicht anonym gelesen oder stimmt nicht überein")
+        stable_key = f"{PRODUCTION_PREFIX}/imager/headless/s3/os-list.json"
+        run_aws(
+            ["s3", "cp", str(stable_path), f"s3://{BUCKET}/{stable_key}", "--no-progress"],
+            profile,
+            endpoint,
+            region,
+        )
+        stable_probe = subprocess.run(
+            ["curl", "--fail", "--silent", "--show-error", "--head", destination_url(base, stable_key)],
+            capture_output=True,
+            text=True,
+        )
+        if stable_probe.returncode:
+            raise PublishError(f"Anonymer HTTPS-Stabilmanifestzugriff für Headless nicht bestätigt: {stable_probe.stderr.strip()}")
+        fetched_stable = subprocess.run(
+            ["curl", "--fail", "--silent", "--show-error", destination_url(base, stable_key)],
+            capture_output=True,
+            text=True,
+        )
+        if fetched_stable.returncode or json.loads(fetched_stable.stdout) != json.loads(stable_path.read_text()):
+            raise PublishError("Stabiles Headless-Manifest kann nicht anonym gelesen oder stimmt nicht überein")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("package_dir", type=Path, nargs="?")
@@ -424,29 +628,43 @@ def main() -> int:
             return 0
         if args.package_dir is None:
             raise PublishError("Paketverzeichnis fehlt")
-        metadata = validate_package(args.package_dir)
-        target = resolve_target(args.profile, args.endpoint, args.region)
-        if args.dry_run:
-            if not args.public_base_url.startswith("https://"):
-                raise PublishError("Dry-Run benötigt eine plausible HTTPS-Basis-URL, ändert aber keine Bucket-Objekte")
+        # Paketstatus entscheidet über den Zielpfad (test -> ros-pi-gen-test/,
+        # production -> ros-pi-gen/); jeder Pfad validiert und prüft die
+        # Freigabe-Env innerhalb seiner eigenen publish_*_package()-Funktion.
+        try:
+            raw_status = json.loads((args.package_dir / "package.json").read_text()).get("status")
+        except (OSError, json.JSONDecodeError) as error:
+            raise PublishError("package.json fehlt oder ist ungültig") from error
+        if raw_status == "production":
+            publish_production_package(
+                args.package_dir,
+                args.profile,
+                args.endpoint,
+                args.region,
+                args.public_base_url,
+                dry_run=args.dry_run,
+            )
+            if not args.dry_run:
+                print("Produktionspaket veröffentlicht und geprüft.")
+                return 0
+        elif raw_status == "test":
+            publish_test_package(
+                args.package_dir,
+                args.profile,
+                args.endpoint,
+                args.region,
+                args.public_base_url,
+                dry_run=args.dry_run,
+            )
+            if not args.dry_run:
+                print("Testpaket veröffentlicht und geprüft.")
+                return 0
         else:
-            if os.environ.get(target["write_approval_env"]) != "yes":
-                raise PublishError(
-                    f"S3-Schreibzugriff für Ziel '{target['name']}' ist noch nicht ausdrücklich freigegeben "
-                    f"({target['write_approval_env']}=yes erforderlich)"
-                )
-        publish_test_package(
-            args.package_dir,
-            args.profile,
-            args.endpoint,
-            args.region,
-            args.public_base_url,
-            dry_run=args.dry_run,
-        )
+            raise PublishError(f"Unbekannter oder nicht veröffentlichbarer Paketstatus: {raw_status!r}")
     except (PublishError, package_image.PackageError, OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
-        print(f"S3-Testveröffentlichung abgebrochen: {error}", file=sys.stderr)
+        print(f"S3-Veröffentlichung abgebrochen: {error}", file=sys.stderr)
         return 1
-    print("Testpaket veröffentlicht und geprüft.")
+    print("Dry-Run abgeschlossen (keine Objekte verändert).")
     return 0
 
 
