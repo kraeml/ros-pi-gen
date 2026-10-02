@@ -99,13 +99,26 @@ make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/
 make ci        # alles nacheinander: venv lint setup build test
 ```
 
-Für den lokalen Raspberry-Pi-Imager-Test zuerst das Paket erzeugen, dann im Paketverzeichnis einen HTTP-Server starten:
+`RELEASE_BUILD=1` ist seit Kurzem Default (Quickfix-Stage `04-user-data`
+aus) — sowohl lokal als auch im GitHub-Actions-Workflow; damit bauen beide
+ohne weiteres Zutun release-sauber. Für den lokalen Gate-1-Imager-Test
+(Schnelltest ohne Release-Tag, Status `local-test`) ist daher der explizite
+Opt-in `RELEASE_BUILD=0` nötig — der aktive Testbenutzer `robot` ist bewusst
+nur ein lokaler Ausnahmefall und darf nie der GitHub-Standard sein:
+
+```bash
+make build RELEASE_BUILD=0
+make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/ RELEASE_BUILD=0
+```
+
+Für den lokalen Raspberry-Pi-Imager-Test danach im Paketverzeichnis einen
+HTTP-Server starten:
 
 ```bash
 cd package/headless && python3 -m http.server 8000
 ```
 
-Repository-URL: `http://127.0.0.1:8000/os-list.json`. Image und das schemaerforderliche `roboter-os.svg` werden daneben abgelegt. Ohne Release-Tag erhalten Pakete den Status `local-test` und sind ausdrücklich nicht veröffentlichbar. Für getaggte Release-Builds deaktiviert `make build RELEASE_BUILD=1` die Quickfix-Stage; die Paketierung prüft danach Seed, Benutzer, SSH-Passwörter und Betreiber-Schlüssel. Die gepinnten Imager-V4-Quellen werden bei Bedarf nach `.cache/imager/` geladen und per SHA-256 geprüft. Da die gepinnte V4-Schemaquelle `icon` für OS-Einträge verlangt, ist das Icon im Manifest erforderlich.
+Repository-URL: `http://127.0.0.1:8000/os-list.json`. Image und das schemaerforderliche `roboter-os.svg` werden daneben abgelegt. Ohne Release-Tag erhalten Pakete den Status `local-test` und sind ausdrücklich nicht veröffentlichbar. Für getaggte Release-Builds (Default `RELEASE_BUILD=1`) ist die Quickfix-Stage deaktiviert; die Paketierung prüft danach Seed, Benutzer, SSH-Passwörter und Betreiber-Schlüssel. Die gepinnten Imager-V4-Quellen werden bei Bedarf nach `.cache/imager/` geladen und per SHA-256 geprüft. Da die gepinnte V4-Schemaquelle `icon` für OS-Einträge verlangt, ist das Icon im Manifest erforderlich.
 
 ### Gate 2: lokale Testveröffentlichung nach OMV/MinIO (S3)
 

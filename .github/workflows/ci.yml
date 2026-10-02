@@ -65,6 +65,9 @@ jobs:
       - name: Setup (headless)
         run: make setup VARIANT=headless
 
+      # RELEASE_BUILD=1 ist Makefile-Default (Quickfix-Stage 04-user-data
+      # aus) — wird hier bewusst NICHT überschrieben. GitHub darf niemals
+      # mit dem aktiven Testbenutzer robot (RELEASE_BUILD=0) bauen.
       - name: Build (headless)
         run: make build VARIANT=headless
 

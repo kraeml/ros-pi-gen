@@ -119,15 +119,17 @@ def test_image_boot_cloudinit_template_inert(pack, name, erlaubte_schluessel):
 
 def test_image_boot_user_data_matches_build_mode(pack):
     """`boot/user-data` hat zwei gueltige, sich gegenseitig ausschliessende
-    Zustaende, je nachdem ob 04-user-data/SKIP beim Build gesetzt war
-    (RELEASE_BUILD=1, Standard fuer S3/GitHub-Veroeffentlichungen) oder
-    nicht (RELEASE_BUILD=0, Makefile-Default fuer lokale Dev-/CI-Builds,
-    siehe README-Schnellstart `make build`):
+    Zustaende, je nachdem ob 04-user-data/SKIP beim Build gesetzt war.
+    RELEASE_BUILD=1 ist Makefile-Default (gilt lokal wie im GitHub-
+    Actions-Workflow) und setzt die SKIP-Datei -> inertes Template.
+    RELEASE_BUILD=0 ist ein expliziter, ausschliesslich lokaler Opt-in
+    fuer den Gate-1-Schnelltest (README "Schnellstart") und laesst den
+    Testbenutzer robot aktiv; dieser Modus darf nie auf GitHub laufen.
 
-    - aktiv (Quickfix): exakt der bekannte Platzhalter-Benutzer `robot`
-      mit Testpasswort/-SSH-Schluesseln (Übergangsloesung, siehe
-      README.md "Erster Benutzer")
-    - inert (Release): reines Kommentar-Template ohne aktive
+    - aktiv (Quickfix, nur bei explizitem RELEASE_BUILD=0): exakt der
+      bekannte Platzhalter-Benutzer `robot` mit Testpasswort/-SSH-
+      Schluesseln (Übergangsloesung, siehe README.md "Erster Benutzer")
+    - inert (Release, Default): reines Kommentar-Template ohne aktive
       Zugangsdaten (von tools/package_image.py:audit_release_image vor
       jeder Veroeffentlichung zusaetzlich geprueft)
 

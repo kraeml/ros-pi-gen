@@ -4,7 +4,11 @@
 # GitHub-Image-Workflow.md, § 2). Identisch lokal lauffähig.
 #
 # Wichtigste Aufrufe:
-#   make setup && make build          # Docker-Build (Default), headless
+#   make setup && make build          # Docker-Build (Default), headless,
+#                                        RELEASE_BUILD=1 (Default: Quickfix-
+#                                        Stage 04-user-data aus)
+#   make build RELEASE_BUILD=0        # Lokaler Opt-in: aktiver Testbenutzer
+#                                        robot (nie auf GitHub bauen!)
 #   make build VARIANT=desktop        # Desktop-Variante
 #   make build ENGINE=native          # nativer Build ohne Docker
 #   make setup MODE=overlay           # Legacy: Overlay-cp in pi-gen/stage2
@@ -35,7 +39,14 @@ VENV       := $(REPO_ROOT)/.venv
 MODE     ?= stage-custom
 VARIANT  ?= headless
 ENGINE   ?= docker
-RELEASE_BUILD ?= 0
+# RELEASE_BUILD=1 ist Default (Quickfix-Stage 04-user-data aus, siehe
+# "Ausschluss des temporären 04-user-data" in AGENTS.md): sowohl lokale
+# Builds als auch der GitHub-Actions-Workflow (.github/workflows/ci.yml)
+# bauen ohne explizites Zutun release-sauber. Der aktive Quickfix
+# (Testbenutzer robot, Testpasswort/-SSH-Keys) ist ausschließlich ein
+# expliziter, lokaler Opt-in per RELEASE_BUILD=0 — niemals der Default
+# auf GitHub.
+RELEASE_BUILD ?= 1
 BASE_URL ?=
 PACKAGE_DIR ?= $(REPO_ROOT)/package/$(VARIANT)
 HEADLESS_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-test
