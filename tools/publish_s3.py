@@ -452,31 +452,18 @@ def publish_test_package(
             raise PublishError("Stabiles Headless-Manifest kann nicht anonym gelesen oder stimmt nicht überein")
 
 
-def publish_production_package(
-    package_dir: Path,
-    profile: str,
-    endpoint: str,
-    region: str,
-    public_base_url: str,
-    *,
-    dry_run: bool = False,
-) -> None:
-    """Veröffentlicht ein Headless-only-Produktionspaket (Status
-    production) nach ros-pi-gen/ auf Hetzner (Etappe 4, AGENTS.md
-    Headless-only-Übergangsregelung).
-
-    Bewusst strukturell auf das Ziel 'hetzner' beschränkt — OMV darf
-    niemals Produktionsschreibrechte erhalten, unabhängig davon, ob dessen
-    eigener Gate-2-Freigabeschalter gesetzt ist. Nutzt einen eigenen
-    Freigabeschalter (PRODUCTION_WRITE_APPROVAL_ENV), damit eine für Gate 3
+def _require_production_target_and_approval(profile: str, endpoint: str, region: str, *, dry_run: bool) -> None:
+    """Gemeinsame Sicherheitsprüfung für publish_production_image() und
+    publish_production_manifests(): strukturell auf das Ziel 'hetzner'
+    beschränkt — OMV darf niemals Produktionsschreibrechte erhalten,
+    unabhängig davon, ob dessen eigener Gate-2-Freigabeschalter gesetzt
+    ist. Nutzt einen eigenen Freigabeschalter
+    (PRODUCTION_WRITE_APPROVAL_ENV), damit eine für Gate 3
     (Testveröffentlichung auf Hetzner) erteilte Freigabe niemals
-    automatisch auch einen Produktionsupload erlaubt.
-
-    Ablauf identisch zu publish_test_package() (Image zuerst, dann
-    versioniertes Manifest, dann stabiles Manifest — jeweils mit anonymer
-    HTTPS-Verifikation nach jedem Schritt), nur mit PRODUCTION_PREFIX statt
-    TEST_PREFIX und validate_production_package() statt validate_package().
-    """
+    automatisch auch einen Produktionsupload erlaubt. Jede der beiden
+    Funktionen prüft dies eigenständig (kein gemeinsamer Zustand), damit
+    ein isolierter Aufruf (z. B. nur Manifeste erneut veröffentlichen)
+    denselben Schutz erhält wie der volle Ablauf."""
     target = resolve_target(profile, endpoint, region)
     if target["name"] != "hetzner":
         raise PublishError(
@@ -488,35 +475,57 @@ def publish_production_package(
             "S3-Produktions-Schreibzugriff ist noch nicht ausdrücklich freigegeben "
             f"({PRODUCTION_WRITE_APPROVAL_ENV}=yes erforderlich)"
         )
+
+
+def _require_https_base(base: str) -> None:
+    parsed_base = urlsplit(base)
+    if parsed_base.scheme != "https" or not parsed_base.netloc or parsed_base.query or parsed_base.fragment:
+        raise PublishError("Die bestätigte öffentliche HTTPS-Objektbasis ist zwingend erforderlich")
+
+
+def publish_production_image(
+    package_dir: Path,
+    profile: str,
+    endpoint: str,
+    region: str,
+    public_base_url: str,
+    *,
+    dry_run: bool = False,
+) -> dict:
+    """Veröffentlicht ausschließlich Image + Icon eines Headless-only-
+    Produktionspakets (Status production) unter ros-pi-gen/releases/<version>/
+    auf Hetzner und verifiziert beide anonym per HTTPS (Etappe 4,
+    AGENTS.md Headless-only-Übergangsregelung).
+
+    Lädt bewusst NICHT die S3-Manifeste hoch (siehe
+    publish_production_manifests()): AGENTS.md verlangt für
+    Produktionsreleases die Reihenfolge Image -> GitHub-Draft (mit allen
+    Assets, inkl. desselben Image als separatem GitHub-Release-Asset) ->
+    S3-Manifeste (versioniert, dann stabil) -> GitHub-Release
+    veröffentlichen. Der aufrufende Workflow ruft publish_production_image(),
+    dann den GitHub-Draft-Schritt, dann publish_production_manifests(),
+    dann die GitHub-Veröffentlichung — in dieser Reihenfolge.
+
+    Prüft die Versions-Wiederverwendung (list_version_objects) bereits
+    hier, vor jeglichem Upload, damit ein Workflow-Abbruch vor dem
+    GitHub-Draft-Schritt keine Teil-Veröffentlichung hinterlässt.
+
+    Gibt die validierten Paketdaten (metadata) zurück, damit der
+    aufrufende Workflow denselben, einmal geprüften Stand für den
+    GitHub-Draft-Schritt wiederverwenden kann (AGENTS.md: "Hashes und
+    Größen werden einmal im Paket erzeugt").
+    """
+    _require_production_target_and_approval(profile, endpoint, region, dry_run=dry_run)
     metadata = validate_production_package(package_dir)
     version = metadata["version"]
     base = public_base_url.rstrip("/")
     if not dry_run:
-        parsed_base = urlsplit(base)
-        if parsed_base.scheme != "https" or not parsed_base.netloc or parsed_base.query or parsed_base.fragment:
-            raise PublishError("Die bestätigte öffentliche HTTPS-Objektbasis ist zwingend erforderlich")
+        _require_https_base(base)
     image_name = f"roboter-os-{version}-headless.img.xz"
     image_key = f"{PRODUCTION_PREFIX}/releases/{version}/{image_name}"
 
-    schema_path, catalog_path = package_image.pinned_sources()
-    with tempfile.TemporaryDirectory(prefix="ros-pi-gen-production-publish-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="ros-pi-gen-production-image-publish-") as temporary:
         temp_dir = Path(temporary)
-        manifest = json.loads((package_dir / "os-list.json").read_text())
-        entry = manifest["os_list"][0]
-        entry["url"] = (
-            f"https://validation.invalid/{image_key}"
-            if dry_run else destination_url(base, image_key)
-        )
-        entry["icon"] = (
-            f"https://validation.invalid/{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg"
-            if dry_run else destination_url(base, f"{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg")
-        )
-        package_image.validate_manifest(manifest, schema_path, catalog_path)
-        version_path = temp_dir / "os-list.json"
-        version_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
-        stable_path = temp_dir / "stable-os-list.json"
-        stable_manifest = json.loads(json.dumps(manifest))
-        stable_path.write_text(json.dumps(stable_manifest, indent=2, ensure_ascii=False) + "\n")
         objects = [] if dry_run else list_version_objects(
             profile,
             endpoint,
@@ -526,10 +535,8 @@ def publish_production_package(
         if objects:
             raise PublishError(f"Version {version} enthält bereits Objekte unter {PRODUCTION_PREFIX}; nächste Version erforderlich")
         if dry_run:
-            return
-        parsed_base = urlsplit(base)
-        if parsed_base.scheme != "https" or not parsed_base.netloc or parsed_base.query or parsed_base.fragment:
-            raise PublishError("Die bestätigte öffentliche HTTPS-Objektbasis ist zwingend erforderlich")
+            return metadata
+        _require_https_base(base)
         run_aws(
             ["s3", "cp", str(package_dir / image_name), f"s3://{BUCKET}/{image_key}", "--no-progress"],
             profile,
@@ -559,6 +566,74 @@ def publish_production_package(
         )
         if public_probe.returncode:
             raise PublishError(f"Anonymer HTTPS-Imagezugriff für Headless nicht bestätigt: {public_probe.stderr.strip()}")
+    return metadata
+
+
+def publish_production_manifests(
+    package_dir: Path,
+    profile: str,
+    endpoint: str,
+    region: str,
+    public_base_url: str,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Veröffentlicht die S3-Manifeste (versioniert, dann stabil) eines
+    Headless-only-Produktionspakets auf Hetzner (Etappe 4, AGENTS.md
+    Headless-only-Übergangsregelung).
+
+    Setzt voraus, dass publish_production_image() für dieselbe Version
+    bereits erfolgreich war (Image+Icon liegen unter
+    ros-pi-gen/releases/<version>/ und sind anonym erreichbar) — dies wird
+    hier NICHT erneut geprüft, da das stabile Manifest laut AGENTS.md
+    ohnehin erst nach erfolgreichem GitHub-Draft-Schritt aktualisiert
+    werden darf, der bereits auf denselben Image-Upload aufsetzt.
+
+    Prüft die Versions-Wiederverwendung erneut und eigenständig (nicht nur
+    im Image-Schritt), damit ein isolierter Aufruf dieser Funktion
+    denselben Schutz erhält.
+    """
+    _require_production_target_and_approval(profile, endpoint, region, dry_run=dry_run)
+    metadata = validate_production_package(package_dir)
+    version = metadata["version"]
+    base = public_base_url.rstrip("/")
+    if not dry_run:
+        _require_https_base(base)
+    image_key = f"{PRODUCTION_PREFIX}/releases/{version}/roboter-os-{version}-headless.img.xz"
+
+    schema_path, catalog_path = package_image.pinned_sources()
+    with tempfile.TemporaryDirectory(prefix="ros-pi-gen-production-manifest-publish-") as temporary:
+        temp_dir = Path(temporary)
+        manifest = json.loads((package_dir / "os-list.json").read_text())
+        entry = manifest["os_list"][0]
+        entry["url"] = (
+            f"https://validation.invalid/{image_key}"
+            if dry_run else destination_url(base, image_key)
+        )
+        entry["icon"] = (
+            f"https://validation.invalid/{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg"
+            if dry_run else destination_url(base, f"{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg")
+        )
+        package_image.validate_manifest(manifest, schema_path, catalog_path)
+        version_path = temp_dir / "os-list.json"
+        version_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+        stable_path = temp_dir / "stable-os-list.json"
+        stable_manifest = json.loads(json.dumps(manifest))
+        stable_path.write_text(json.dumps(stable_manifest, indent=2, ensure_ascii=False) + "\n")
+        objects = [] if dry_run else list_version_objects(
+            profile,
+            endpoint,
+            region,
+            f"{PRODUCTION_PREFIX}/releases/{version}/",
+        )
+        if not dry_run and not objects:
+            raise PublishError(
+                f"Version {version} hat noch keine Objekte unter {PRODUCTION_PREFIX} — "
+                "publish_production_image() muss zuerst erfolgreich gelaufen sein"
+            )
+        if dry_run:
+            return
+        _require_https_base(base)
         version_key = f"{PRODUCTION_PREFIX}/releases/{version}/headless-os-list.json"
         run_aws(
             ["s3", "cp", str(version_path), f"s3://{BUCKET}/{version_key}", "--no-progress"],
@@ -603,6 +678,33 @@ def publish_production_package(
             raise PublishError("Stabiles Headless-Manifest kann nicht anonym gelesen oder stimmt nicht überein")
 
 
+def publish_production_package(
+    package_dir: Path,
+    profile: str,
+    endpoint: str,
+    region: str,
+    public_base_url: str,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Komplettablauf (Image+Icon, dann beide Manifeste) für einen
+    einzelnen, synchronen Aufruf -- z. B. über publish-s3.sh/die CLI
+    weiter unten, wo kein GitHub-Draft-Schritt dazwischengeschoben werden
+    muss. Der produktionsscharfe Release-Workflow (Etappe 4) ruft
+    stattdessen publish_production_image() und
+    publish_production_manifests() einzeln auf, mit dem GitHub-Draft-
+    Schritt dazwischen (siehe deren Docstrings sowie AGENTS.md)."""
+    metadata = publish_production_image(
+        package_dir, profile, endpoint, region, public_base_url, dry_run=dry_run
+    )
+    if dry_run:
+        return
+    publish_production_manifests(
+        package_dir, profile, endpoint, region, public_base_url, dry_run=dry_run
+    )
+    return metadata
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("package_dir", type=Path, nargs="?")
@@ -612,6 +714,18 @@ def main() -> int:
     parser.add_argument("--region", required=True)
     parser.add_argument("--public-base-url", default=DEFAULT_PUBLIC_BASE_URL)
     parser.add_argument("--dry-run", action="store_true")
+    # Nur für Paketstatus production relevant: erlaubt dem aufrufenden
+    # Release-Workflow (Etappe 4), den GitHub-Draft-Schritt zwischen
+    # Image-Upload und Manifest-Upload einzuschieben (AGENTS.md-
+    # Reihenfolge: Image -> GitHub-Draft -> S3-Manifeste -> GitHub-Release).
+    # Ohne diese Option (Default) läuft weiterhin der komplette Ablauf in
+    # einem Aufruf, wie für Gate-2/3-Testpakete (Status test) üblich.
+    parser.add_argument(
+        "--production-step",
+        choices=["image", "manifests"],
+        default=None,
+        help="Nur den Image- oder den Manifest-Schritt des Produktions-Publish ausführen",
+    )
     args = parser.parse_args()
     try:
         if args.read_only_check:
@@ -635,18 +749,45 @@ def main() -> int:
             raw_status = json.loads((args.package_dir / "package.json").read_text()).get("status")
         except (OSError, json.JSONDecodeError) as error:
             raise PublishError("package.json fehlt oder ist ungültig") from error
+        if args.production_step is not None and raw_status != "production":
+            raise PublishError("--production-step ist nur für Paketstatus production zulässig")
         if raw_status == "production":
-            publish_production_package(
-                args.package_dir,
-                args.profile,
-                args.endpoint,
-                args.region,
-                args.public_base_url,
-                dry_run=args.dry_run,
-            )
-            if not args.dry_run:
-                print("Produktionspaket veröffentlicht und geprüft.")
-                return 0
+            if args.production_step == "image":
+                publish_production_image(
+                    args.package_dir,
+                    args.profile,
+                    args.endpoint,
+                    args.region,
+                    args.public_base_url,
+                    dry_run=args.dry_run,
+                )
+                if not args.dry_run:
+                    print("Produktions-Image veröffentlicht und geprüft.")
+                    return 0
+            elif args.production_step == "manifests":
+                publish_production_manifests(
+                    args.package_dir,
+                    args.profile,
+                    args.endpoint,
+                    args.region,
+                    args.public_base_url,
+                    dry_run=args.dry_run,
+                )
+                if not args.dry_run:
+                    print("Produktions-Manifeste veröffentlicht und geprüft.")
+                    return 0
+            else:
+                publish_production_package(
+                    args.package_dir,
+                    args.profile,
+                    args.endpoint,
+                    args.region,
+                    args.public_base_url,
+                    dry_run=args.dry_run,
+                )
+                if not args.dry_run:
+                    print("Produktionspaket veröffentlicht und geprüft.")
+                    return 0
         elif raw_status == "test":
             publish_test_package(
                 args.package_dir,

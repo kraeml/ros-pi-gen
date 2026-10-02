@@ -104,7 +104,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production clean-release-stage ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests clean-release-stage ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -126,6 +126,8 @@ help:
 	@echo "  make publish-s3-test S3_TARGET=omv|hetzner   Testpaket nach ros-pi-gen-test/ publizieren (nur nach Freigaben; Default omv)"
 	@echo "  make publish-s3-test-read-only-check S3_TARGET=omv|hetzner   Nur Lesezugriff pruefen, kein Upload"
 	@echo "  make publish-s3-production    Headless-only-Produktionspaket nach ros-pi-gen/ auf Hetzner (nur nach ROS_PI_GEN_PRODUCTION_WRITE_APPROVED=yes)"
+	@echo "  make publish-s3-production-image      Nur Image+Icon veröffentlichen (Release-Workflow-Schritt vor GitHub-Draft)"
+	@echo "  make publish-s3-production-manifests  Nur S3-Manifeste veröffentlichen (Release-Workflow-Schritt nach GitHub-Draft)"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
@@ -275,6 +277,19 @@ publish-s3-test-read-only-check: venv
 publish-s3-production: venv
 	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
 	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner $(if $(filter 1,$(DRY_RUN)),--dry-run,)
+
+# Getrennte Produktions-Publish-Schritte (Etappe 4, AGENTS.md-Reihenfolge):
+# der Release-Workflow ruft zuerst publish-s3-production-image, dann den
+# GitHub-Draft-Schritt, dann publish-s3-production-manifests, dann die
+# GitHub-Veröffentlichung -- niemals den kombinierten Alias
+# publish-s3-production (der bleibt für isolierte lokale Tests nützlich).
+publish-s3-production-image: venv
+	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
+	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner --production-step image $(if $(filter 1,$(DRY_RUN)),--dry-run,)
+
+publish-s3-production-manifests: venv
+	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
+	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner --production-step manifests $(if $(filter 1,$(DRY_RUN)),--dry-run,)
 
 # --- ci (Pipeline-Kette; Stufen wie GitHub-Image-Workflow.md, § 3) ----------
 ci: venv lint setup build test

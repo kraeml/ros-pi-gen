@@ -294,6 +294,99 @@ def test_production_publish_fails_closed_when_existing_objects_exist(tmp_path, m
         )
 
 
+def test_publish_production_image_returns_metadata_without_touching_manifests(tmp_path, monkeypatch):
+    """publish_production_image() lädt ausschließlich Image+Icon hoch und
+    liefert die validierten Paketdaten zurück, damit ein Workflow dazwischen
+    den GitHub-Draft-Schritt einfügen kann, bevor die Manifeste
+    veröffentlicht werden (AGENTS.md-Reihenfolge, Etappe 4)."""
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setenv(publish_s3.PRODUCTION_WRITE_APPROVAL_ENV, "yes")
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    calls = []
+
+    def fake_run_aws(args, *a, **k):
+        calls.append(args)
+        return publish_s3.subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: [])
+    monkeypatch.setattr(publish_s3.package_image, "sha256_file", lambda path: metadata["image_download_sha256"])
+    monkeypatch.setattr(
+        publish_s3.subprocess,
+        "run",
+        lambda command, **kwargs: publish_s3.subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    result = publish_s3.publish_production_image(
+        tmp_path / "release",
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+        "https://example.invalid/bucket",
+    )
+    assert result == metadata
+    # Keine Manifest-Objekte (os-list.json/headless-os-list.json) werden
+    # von diesem Schritt hochgeladen -- nur Image und Icon.
+    uploaded_sources = [args[2] for args in calls if args[:2] == ["s3", "cp"]]
+    assert not any(str(path).endswith("os-list.json") for path in uploaded_sources)
+
+
+def test_publish_production_manifests_requires_prior_image_publish(tmp_path, monkeypatch):
+    """publish_production_manifests() bricht ab, wenn noch keine Objekte
+    unter der Version liegen -- publish_production_image() muss laut
+    AGENTS.md-Reihenfolge zuerst erfolgreich gelaufen sein."""
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setenv(publish_s3.PRODUCTION_WRITE_APPROVAL_ENV, "yes")
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    monkeypatch.setattr(publish_s3.package_image, "pinned_sources", lambda: (tmp_path / "schema", tmp_path / "catalog"))
+    monkeypatch.setattr(publish_s3.package_image, "validate_manifest", lambda *args: None)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: [])
+    with pytest.raises(publish_s3.PublishError, match="noch keine Objekte"):
+        publish_s3.publish_production_manifests(
+            tmp_path / "release",
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "https://example.invalid/bucket",
+        )
+
+
+def test_publish_production_manifests_dry_run_never_contacts_aws(tmp_path, monkeypatch):
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: pytest.fail("dry-run invoked S3"))
+    monkeypatch.setattr(publish_s3.package_image, "pinned_sources", lambda: (tmp_path / "schema", tmp_path / "catalog"))
+    monkeypatch.setattr(publish_s3.package_image, "validate_manifest", lambda *args: None)
+    publish_s3.publish_production_manifests(
+        tmp_path / "release",
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+        "https://example.invalid/bucket",
+        dry_run=True,
+    )
+
+
+def test_publish_production_manifests_is_hetzner_only(tmp_path, monkeypatch):
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    with pytest.raises(publish_s3.PublishError, match="ausschließlich.*hetzner|hetzner.*ausschließlich"):
+        publish_s3.publish_production_manifests(
+            tmp_path / "release",
+            publish_s3.EXPECTED_TEST_PROFILE,
+            publish_s3.EXPECTED_ENDPOINT,
+            publish_s3.EXPECTED_REGION,
+            "https://example.invalid/bucket",
+        )
+
+
 def test_version_scan_rejects_bare_production_root_prefix():
     """Der bloße Produktionspräfix 'ros-pi-gen/' ohne konkrete
     Versions-Unterebene ist nie erlaubt — keine bucketweite
