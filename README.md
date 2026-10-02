@@ -107,6 +107,41 @@ cd package/headless && python3 -m http.server 8000
 
 Repository-URL: `http://127.0.0.1:8000/os-list.json`. Image und das schemaerforderliche `roboter-os.svg` werden daneben abgelegt. Ohne Release-Tag erhalten Pakete den Status `local-test` und sind ausdrücklich nicht veröffentlichbar. Für getaggte Release-Builds deaktiviert `make build RELEASE_BUILD=1` die Quickfix-Stage; die Paketierung prüft danach Seed, Benutzer, SSH-Passwörter und Betreiber-Schlüssel. Die gepinnten Imager-V4-Quellen werden bei Bedarf nach `.cache/imager/` geladen und per SHA-256 geprüft. Da die gepinnte V4-Schemaquelle `icon` für OS-Einträge verlangt, ist das Icon im Manifest erforderlich.
 
+### Gate 2: lokale Testveröffentlichung nach OMV/MinIO (S3)
+
+Für den LAN-Test (Schülergeräte ohne WAN-Internet) gibt es einen zweiten,
+lokal ausführbaren Adapter, der ein Headless-Testpaket ausschließlich unter
+dem Testpräfix `ros-pi-gen-test/` auf dem OMV/MinIO-S3 veröffentlicht.
+Vollständige Policy (Profile, Präfixe, Freigabe-Gates, Rollback-Regeln) steht
+in [AGENTS.md](AGENTS.md); hier nur der Befehlsablauf:
+
+```bash
+git tag -a image-YYYY.MM.PATCH-test -m "Gate 2 OMV headless test package"
+make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/ RELEASE_BUILD=1
+make package-release HEADLESS_PACKAGE_DIR=package/headless \
+                      RELEASE_PACKAGE_DIR=package/headless-release-test
+make publish-s3-test RELEASE_PACKAGE_DIR=package/headless-release-test DRY_RUN=1   # Validierung ohne Upload
+ROS_PI_GEN_GATE2_WRITE_APPROVED=yes \
+  make publish-s3-test RELEASE_PACKAGE_DIR=package/headless-release-test          # echter Upload
+```
+
+`make package-release` führt das Headless-Paket zu einem vollständigen
+Gate-2-Release-Paket zusammen (`tools/merge_test_packages.py`); `make
+publish-s3-test` validiert und lädt es hoch (`tools/publish-s3.sh` →
+`tools/publish_s3.py`). Der eigentliche Schreibzugriff setzt zusätzlich den
+expliziten Freigabeschalter `ROS_PI_GEN_GATE2_WRITE_APPROVED=yes` voraus —
+ohne ihn bricht der Publisher vor jedem Upload ab. Schlägt ein Build nach
+einem vorherigen Nicht-Release-Lauf mit „Quickfix-Seed … ist im Image
+enthalten” fehl, liegt das meist am gecachten `stage-custom`-RootFS-Layer;
+`make clean-release-stage CLEAN_RELEASE_STAGE=1` entfernt ihn.
+
+Das stabile Imager-Repository-Manifest für die Headless-Variante dieses
+Testpräfixes liegt unter:
+
+```
+https://s3-intern.kraeml-bayern.de/ros-pi-gen-images/ros-pi-gen-test/imager/headless/s3/os-list.json
+```
+
 Falls ein APT-Proxy benötigt wird, gib ihn als vollständige URL mit Schema
 und Port an; die IP-Adresse allein reicht nicht. Beispiel für apt-cacher-ng:
 
@@ -555,6 +590,9 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 | `Makefile` | Thin-Wrapper: `venv lint setup build test ci` (identisch lokal wie in CI, siehe [GitHub-Image-Workflow.md](GitHub-Image-Workflow.md), § 2) + VM-Targets (`vm-*`, siehe [Build in der VM](#build-in-der-vm-robotics-lab-vm)) |
 | `tools/binfmt.sh` | qemu-Emulation-Entry: Version-Gate (Host-qemu ≥ 6 → kein Eingriff) + temporärer Container-qemu-Entry für ältere Hosts |
 | `tools/build-docker.sh` | Build-Orchestrierung: binfmt-Entry setzen → build-docker.sh → cleanup immer (trap EXIT/INT/TERM, Ctrl+C inklusive) |
+| `tools/package_image.py` | Paketiert ein Build-Artefakt zu Image + `os-list.json` + `SHA256SUMS`; prüft Tag/Version/Status und auditiert Release-Builds (Quickfix-Freiheit) |
+| `tools/merge_test_packages.py` | Fasst ein Headless-Testpaket zu einem vollständigen Gate-2-Release-Paketverzeichnis zusammen (siehe [Gate 2](#gate-2-lokale-testveröffentlichung-nach-omvminio-s3)) |
+| `tools/publish-s3.sh`, `tools/publish_s3.py` | Lokaler OMV/MinIO-Gate-2-Adapter: validiert das Release-Paket und veröffentlicht es ausschließlich unter `ros-pi-gen-test/` (Policy/Details: [AGENTS.md](AGENTS.md)) |
 | `vm/robotics-lab-vm/` | git-Submodul ([robotics-lab-vm](https://codeberg.org/kraeml/robotics-lab-vm)) — Vagrant-VM Ubuntu 24.04 als Build-Umgebung (siehe [Build in der VM](#build-in-der-vm-robotics-lab-vm)) |
 | `work/`, `deploy/` | Build-Erzeugnisse (gitignored): pi-gen-Arbeitsverzeichnis bzw. Image + `build-docker.log` |
 
