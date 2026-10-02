@@ -371,10 +371,16 @@ def render_manifest(metadata: dict, base_url: str) -> dict:
     return {"os_list": [entry]}
 
 
-def write_manifest(package_dir: Path, base_url: str, *, output_name: str = "os-list.json") -> Path:
+def write_manifest(
+    package_dir: Path,
+    base_url: str,
+    *,
+    output_name: str = "os-list.json",
+    output_dir: Path | None = None,
+) -> Path:
     """Rendert und validiert ein Imager-Manifest für das Paket in
     `package_dir` gegen `base_url` und schreibt es unter `output_name` in
-    dasselbe Verzeichnis.
+    `output_dir` (Default: dasselbe Verzeichnis `package_dir`).
 
     `output_name` ist bewusst parametrisiert statt hart auf `os-list.json`
     verdrahtet: Der S3-Publish-Pfad nutzt weiterhin den Default
@@ -385,6 +391,13 @@ def write_manifest(package_dir: Path, base_url: str, *, output_name: str = "os-l
     eigenen, versionierten GitHub-Release-Asset-Basis-URL wiederverwenden
     (AGENTS.md § „make package und Manifest-Rendering“, Punkt 4: Schema ist
     identisch, nur Dateiname und Basis-URL unterscheiden sich je Ziel).
+
+    `output_dir` ist separat von `package_dir` parametrisiert, damit der
+    GitHub-Release-Adapter (tools/github_release.py) das GitHub-Manifest
+    in ein eigenes Verzeichnis schreiben kann, ohne das S3-Produktions-
+    paketverzeichnis zu verändern -- publish_s3.validate_production_package()
+    erwartet dort weiterhin exakt den ursprünglichen, unveränderten
+    Dateisatz (Image, SHA256SUMS, Icon, os-list.json, package.json).
     """
     metadata_path = package_dir / "package.json"
     metadata = json.loads(metadata_path.read_text())
@@ -423,8 +436,10 @@ def write_manifest(package_dir: Path, base_url: str, *, output_name: str = "os-l
     icon_source = ROOT / "assets" / "roboter-os.svg"
     if not icon_source.is_file():
         raise PackageError("Imager-Icon fehlt: assets/roboter-os.svg")
-    shutil.copyfile(icon_source, package_dir / "roboter-os.svg")
-    output = package_dir / output_name
+    target_dir = output_dir if output_dir is not None else package_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(icon_source, target_dir / "roboter-os.svg")
+    output = target_dir / output_name
     output.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     subprocess.run([sys.executable, "-m", "json.tool", str(output)], check=True, stdout=subprocess.DEVNULL)
     image_path = package_dir / metadata["image_file"]
@@ -447,15 +462,27 @@ def github_manifest_name(variant: str) -> str:
     return f"{variant}-os-list.json"
 
 
-def write_github_manifest(package_dir: Path, release_asset_base_url: str) -> Path:
+def write_github_manifest(
+    package_dir: Path, release_asset_base_url: str, *, output_dir: Path | None = None
+) -> Path:
     """Rendert das variantenspezifische GitHub-Release-Manifest
     (`<variant>-os-list.json`) für das Paket in `package_dir` gegen die
     versionierte GitHub-Release-Asset-Basis-URL. Nutzt denselben
     Schema-validierten Renderer wie das S3-Manifest (write_manifest);
-    unterscheidet sich ausschließlich in Zieldateiname und Basis-URL."""
+    unterscheidet sich ausschließlich in Zieldateiname und Basis-URL.
+
+    `output_dir` (Default: `package_dir`) steuert, wohin das Manifest (und
+    die dabei mitkopierte Icon-Datei) geschrieben wird -- siehe
+    write_manifest()-Docstring für die Begründung, warum der
+    GitHub-Release-Adapter dies von `package_dir` entkoppeln muss."""
     metadata = json.loads((package_dir / "package.json").read_text())
     variant = metadata.get("variant")
-    return write_manifest(package_dir, release_asset_base_url, output_name=github_manifest_name(variant))
+    return write_manifest(
+        package_dir,
+        release_asset_base_url,
+        output_name=github_manifest_name(variant),
+        output_dir=output_dir,
+    )
 
 
 def package_image(variant: str, deploy_dir: Path, output_dir: Path, base_url: str, release_build: bool) -> None:

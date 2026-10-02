@@ -155,6 +155,67 @@ Testpräfixes liegt unter:
 https://s3-intern.kraeml-bayern.de/ros-pi-gen-images/ros-pi-gen-test/imager/headless/s3/os-list.json
 ```
 
+### Gate 3: lokale Testveröffentlichung nach Hetzner/WAN (S3)
+
+Identischer Ablauf wie Gate 2, nur mit `S3_TARGET=hetzner` (eigener
+Freigabeschalter `ROS_PI_GEN_GATE3_WRITE_APPROVED`, eigenes Profil
+`hetzner-prod`). Volle Policy in [AGENTS.md](AGENTS.md):
+
+```bash
+git tag -a image-YYYY.MM.PATCH-test -m "Gate 3 Hetzner headless test package"
+make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/ RELEASE_BUILD=1
+make package-release HEADLESS_PACKAGE_DIR=package/headless \
+                      RELEASE_PACKAGE_DIR=package/headless-release-test
+make publish-s3-test S3_TARGET=hetzner RELEASE_PACKAGE_DIR=package/headless-release-test DRY_RUN=1
+ROS_PI_GEN_GATE3_WRITE_APPROVED=yes \
+  make publish-s3-test S3_TARGET=hetzner RELEASE_PACKAGE_DIR=package/headless-release-test
+```
+
+### Etappe 4: Produktionsrelease (GitHub Actions)
+
+Produktionsreleases laufen ausschließlich über einen annotierten Tag
+`image-YYYY.MM.PATCH` (**ohne** `-test`-Suffix) und lösen
+[`.github/workflows/ci-release.yml`](.github/workflows/ci-release.yml)
+aus — ein dünner Adapter, der dieselben Make-Targets wie lokal aufruft
+(`make build`, `make package`, `make package-production`,
+`make publish-s3-production-image`/`-manifests`,
+`tools/github_release.py`). Headless-only-Übergangsregelung: solange
+Desktop nicht bereitgestellt ist, baut und veröffentlicht der Workflow
+ausschließlich die Variante headless.
+
+Voraussetzungen vor dem ersten echten Produktions-Tag (siehe
+[AGENTS.md](AGENTS.md), Etappe 4, Gate 4):
+
+1. Repo-Secrets `HETZNER_ACCESS_KEY_ID` und `HETZNER_SECRET_ACCESS_KEY`
+   manuell anlegen (GitHub → Settings → Secrets and variables →
+   Actions). Der Workflow referenziert sie nur; sie werden nicht im
+   Workflow selbst angelegt, gelesen oder geloggt. `GITHUB_TOKEN` stellt
+   GitHub Actions automatisch bereit.
+2. `gh auth login` für lokale manuelle Aufrufe von
+   `tools/github_release.py` (die CI nutzt stattdessen `GITHUB_TOKEN` via
+   `GH_TOKEN`-Env, kein `gh auth login` nötig).
+3. Ausdrückliche Gate-4-Freigabe, bevor ein echter Produktions-Tag
+   gepusht wird — ein solcher Push löst den vollständigen Build+Publish-
+   Lauf inklusive echtem S3-Upload und GitHub-Release aus.
+
+Reihenfolge im Workflow (AGENTS.md: Image zuerst, dann GitHub-Draft, dann
+S3-Manifeste, dann GitHub-Veröffentlichung):
+
+```bash
+# Produktions-Tag erstellen und pushen (nur nach Gate-4-Freigabe!):
+git tag -a image-YYYY.MM.PATCH -m "Produktionsrelease YYYY.MM.PATCH"
+git push origin image-YYYY.MM.PATCH
+```
+
+Lokal lassen sich die Produktions-Publish-Schritte einzeln mit
+`DRY_RUN=1` gegen das Ziel `hetzner` validieren, ohne tatsächlich
+hochzuladen:
+
+```bash
+make publish-s3-production-image DRY_RUN=1
+make publish-s3-production-manifests DRY_RUN=1
+```
+
 Falls ein APT-Proxy benötigt wird, gib ihn als vollständige URL mit Schema
 und Port an; die IP-Adresse allein reicht nicht. Beispiel für apt-cacher-ng:
 

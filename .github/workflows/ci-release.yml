@@ -1,0 +1,170 @@
+name: release
+
+# Produktions-Release-Workflow (Etappe 4, AGENTS.md): wird ausschließlich
+# durch einen annotierten Produktions-Tag `image-YYYY.MM.PATCH` (ohne
+# -test-Suffix) ausgelöst. Dünner Adapter -- die gesamte Logik liegt in
+# Make-Targets und versionierten Skripten (tools/*.py, tools/*.sh),
+# identisch zum lokalen Ablauf (siehe README.md/AGENTS.md). Test-Trigger
+# veröffentlichen nichts: Gate-2/3-Testveröffentlichungen laufen
+# ausschließlich manuell/lokal über tools/publish-s3.sh unter
+# ros-pi-gen-test/ (AGENTS.md, Etappe 4). Der Tag-Filter schließt
+# -test-Suffixe bereits aus; der zusätzliche Laufzeit-Guard unten prüft
+# zusätzlich das exakte CalVer-Format.
+#
+# Reihenfolge (AGENTS.md, durchgehende Regeln + Etappe 4): Images zuerst
+# hochladen und verifizieren, versionierte Manifestkopien unveränderlich
+# archivieren und stabile Manifestobjekte erst nach erfolgreichem
+# Image-Upload und erfolgreicher Archivierung zuletzt aktualisieren;
+# GitHub-Release erst nach erfolgreicher S3-Aktualisierung
+# veröffentlichen, damit `latest` nicht vor dem maßgeblichen S3-Stand
+# umspringt:
+#   1. S3: Image + Icon hochladen, anonym per HTTPS verifizieren
+#      (make publish-s3-production-image).
+#   2. GitHub: Draft-Release mit allen vier Assets (Image, Manifest,
+#      SHA256SUMS, Icon) erstellen; Assets NUR über die authentifizierte
+#      API prüfen -- niemals anonym vor Veröffentlichung.
+#   3. S3: versioniertes, dann stabiles Manifest hochladen und
+#      verifizieren (make publish-s3-production-manifests).
+#   4. GitHub: Draft veröffentlichen und als latest markieren.
+#   5. GitHub: anonymen Redirect/Zugriff auf das veröffentlichte
+#      Image-Asset prüfen. Scheitert dieser letzte Schritt, bleibt das
+#      Release veröffentlicht stehen (AGENTS.md: "Release nicht
+#      automatisch zurückziehen") -- der Lauf meldet den Fehlschlag.
+#
+# Headless-only-Übergangsregelung (AGENTS.md): solange Desktop nicht
+# bereitgestellt ist, baut und veröffentlicht dieser Workflow
+# ausschließlich die Variante headless (ein Image, ein
+# GitHub-Manifestasset headless-os-list.json, SHA256SUMS mit genau
+# diesem Dateinamen, zusätzlich das Imager-Icon als eigenständiges
+# 4. GitHub-Asset -- siehe tools/github_release.py).
+#
+# Secrets (manuell als Repo-Secrets anzulegen, siehe README.md):
+# HETZNER_ACCESS_KEY_ID, HETZNER_SECRET_ACCESS_KEY. GITHUB_TOKEN wird von
+# GitHub Actions automatisch bereitgestellt.
+#
+# Vor jedem echten Tag-Push, der diesen Workflow auslösen kann: Gate 4
+# (AGENTS.md) -- ausdrückliche Freigabe erforderlich.
+
+on:
+  push:
+    tags:
+      - "image-*"
+      - "!image-*-test"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Produktions-Tag-Format erzwingen (kein -test-Suffix)
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ ! "$TAG" =~ ^image-[0-9]{4}\.[0-9]{2}\.[0-9]+$ ]]; then
+            echo "Tag '$TAG' ist kein gültiges Produktions-Tag (image-YYYY.MM.PATCH, kein -test-Suffix)." >&2
+            echo "Test-/Gate-2/3-Veröffentlichungen laufen ausschließlich lokal über tools/publish-s3.sh (AGENTS.md)." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      # Siehe .github/workflows/ci.yml für denselben Schritt — Runner-Disk
+      # ist knapp, dieselben sicheren Räum-Kandidaten vorab entfernen.
+      - name: Disk-Cleanup
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/share/swift /opt/hostedtoolcache/CodeQL || true
+          docker image prune -af || true
+          df -h /
+
+      - uses: docker/setup-qemu-action@v4
+
+      - run: make venv
+
+      - name: Setup (headless)
+        run: make setup VARIANT=headless
+
+      # RELEASE_BUILD=1 ist Makefile-Default (Quickfix-Stage 04-user-data
+      # aus) — wird hier bewusst NICHT überschrieben.
+      - name: Build (headless)
+        run: make build VARIANT=headless
+
+      - name: Test
+        run: make test
+
+      - name: Upload build log (immer)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-build-docker-log
+          path: deploy/build-docker.log
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # PACKAGE_DIR wird explizit auf den Pfad gesetzt, den
+      # package-production (PRODUCTION_HEADLESS_PACKAGE_DIR, Makefile-
+      # Default) als Quelle erwartet. BASE_URL ist die bestätigte
+      # Hetzner-Objektbasis (publish_s3.TARGETS["hetzner"]); die
+      # tatsächlichen Image-/Icon-URLs im finalen Manifest werden erst in
+      # publish_production_manifests() mit der versionierten
+      # Release-URL überschrieben (identisches Verhalten wie bei Gate-2/3-
+      # Testpaketen).
+      - name: Paketieren (Status production, Version aus dem annotierten Tag)
+        run: |
+          make package VARIANT=headless \
+            PACKAGE_DIR=package/headless-production \
+            BASE_URL=https://hel1.your-objectstorage.com/ros-pi-gen-images
+
+      - name: Produktions-Release-Paket zusammenführen
+        run: make package-production
+
+      - name: AWS-CLI-Profil hetzner-prod aus Secrets konfigurieren
+        env:
+          HETZNER_ACCESS_KEY_ID: ${{ secrets.HETZNER_ACCESS_KEY_ID }}
+          HETZNER_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_SECRET_ACCESS_KEY }}
+        run: |
+          aws configure set aws_access_key_id "$HETZNER_ACCESS_KEY_ID" --profile hetzner-prod
+          aws configure set aws_secret_access_key "$HETZNER_SECRET_ACCESS_KEY" --profile hetzner-prod
+          aws configure set region hel1 --profile hetzner-prod
+
+      # Schritt 1/5 (siehe Kopfkommentar): Image + Icon zuerst.
+      - name: "S3 (1/2): Produktions-Image + Icon veröffentlichen"
+        env:
+          ROS_PI_GEN_PRODUCTION_WRITE_APPROVED: "yes"
+        run: make publish-s3-production-image
+
+      # Schritt 2/5: Draft mit allen vier Assets, nur authentifiziert
+      # geprüft (siehe tools/github_release.py).
+      - name: GitHub-Draft-Release mit allen Assets erstellen
+        run: .venv/bin/python tools/github_release.py create-draft package/headless-release-production
+
+      - name: GitHub-Draft-Assets nur über die authentifizierte API prüfen
+        run: |
+          IMAGE_NAME=$(basename package/headless-release-production/*.img.xz)
+          .venv/bin/python tools/github_release.py verify-draft "${{ github.ref_name }}" \
+            "$IMAGE_NAME" headless-os-list.json SHA256SUMS roboter-os.svg
+
+      # Schritt 3/5: erst jetzt die S3-Manifeste (versioniert, dann
+      # stabil) aktualisieren -- setzt den erfolgreichen Image-Upload aus
+      # Schritt 1 voraus (publish_production_manifests() prüft dies).
+      - name: "S3 (2/2): versioniertes + stabiles Manifest veröffentlichen"
+        env:
+          ROS_PI_GEN_PRODUCTION_WRITE_APPROVED: "yes"
+        run: make publish-s3-production-manifests
+
+      # Schritt 4/5: erst nach erfolgreichem S3-Update veröffentlichen.
+      - name: GitHub-Release veröffentlichen und als latest markieren
+        run: .venv/bin/python tools/github_release.py publish "${{ github.ref_name }}"
+
+      # Schritt 5/5: anonyme Redirect-/Zugriffsprüfung nach Veröffentlichung.
+      - name: Anonymen Zugriff auf das veröffentlichte Image prüfen
+        run: |
+          IMAGE_NAME=$(basename package/headless-release-production/*.img.xz)
+          .venv/bin/python tools/github_release.py check-public-asset "${{ github.ref_name }}" "$IMAGE_NAME"

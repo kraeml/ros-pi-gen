@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'Usage: %s <release-package-dir> [--target omv|hetzner] [--dry-run] | --read-only-check [--target omv|hetzner]\n' "$0" >&2
+  printf 'Usage: %s <release-package-dir> [--target omv|hetzner] [--dry-run] [--production-step image|manifests] | --read-only-check [--target omv|hetzner]\n' "$0" >&2
 }
 
 if [[ $# -lt 1 ]]; then
@@ -14,6 +14,7 @@ MODE=$1
 shift
 DRY_RUN=0
 TARGET=${S3_TARGET:-omv}
+PRODUCTION_STEP=
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -23,6 +24,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --target)
       TARGET=$2
+      shift 2
+      ;;
+    --production-step)
+      PRODUCTION_STEP=$2
       shift 2
       ;;
     *)
@@ -53,6 +58,12 @@ case "$TARGET" in
 esac
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# publish_s3.py validate_manifest() benötigt jsonschema (venv-
+# Abhängigkeit, siehe tests/requirements.txt) -- Default auf die venv-
+# Python-Binary, die der Makefile-"venv"-Target anlegt; PUBLISH_PYTHON
+# erlaubt einen expliziten Override (z. B. für einen Aufruf außerhalb von
+# make).
+PYTHON=${PUBLISH_PYTHON:-"$SCRIPT_DIR/../.venv/bin/python"}
 
 if [[ "$MODE" == "--read-only-check" ]]; then
   ARGS=(--read-only-check --profile "$PROFILE" --endpoint "$ENDPOINT" --region "$REGION" --public-base-url "$PUBLIC_BASE_URL")
@@ -61,5 +72,8 @@ else
   if [[ "$DRY_RUN" == "1" ]]; then
     ARGS+=(--dry-run)
   fi
+  if [[ -n "$PRODUCTION_STEP" ]]; then
+    ARGS+=(--production-step "$PRODUCTION_STEP")
+  fi
 fi
-exec python3 "$SCRIPT_DIR/publish_s3.py" "${ARGS[@]}"
+exec "$PYTHON" "$SCRIPT_DIR/publish_s3.py" "${ARGS[@]}"
