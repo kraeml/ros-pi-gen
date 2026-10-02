@@ -69,9 +69,12 @@ def test_github_asset_paths_renders_manifest_if_missing(tmp_path):
     assert paths["manifest"].is_file()
     assert paths["image"].name == metadata["image_file"]
     assert paths["sums"].name == "SHA256SUMS"
+    assert paths["icon"].name == "roboter-os.svg"
+    assert paths["icon"].is_file()
     manifest = json.loads(paths["manifest"].read_text())
     entry = manifest["os_list"][0]
     assert entry["url"].startswith(f"https://github.com/{github_release.REPO}/releases/download/image-")
+    assert entry["icon"].startswith(f"https://github.com/{github_release.REPO}/releases/download/image-")
 
 
 def test_github_asset_paths_reuses_existing_manifest(tmp_path):
@@ -89,6 +92,14 @@ def test_github_asset_paths_requires_image_file(tmp_path):
     metadata = make_production_package(package)
     (package / metadata["image_file"]).unlink()
     with pytest.raises(github_release.GithubReleaseError, match="Image fehlt"):
+        github_release.github_asset_paths(package, metadata)
+
+
+def test_github_asset_paths_requires_icon_file(tmp_path):
+    package = tmp_path / "release"
+    metadata = make_production_package(package)
+    (package / "roboter-os.svg").unlink()
+    with pytest.raises(github_release.GithubReleaseError, match="Icon fehlt"):
         github_release.github_asset_paths(package, metadata)
 
 
@@ -134,9 +145,9 @@ def test_create_draft_release_invokes_gh_with_expected_flags(tmp_path, monkeypat
     assert "--draft" in args
     assert "--verify-tag" in args
     assert "--latest=false" in args
-    # Alle drei Assets werden übergeben.
-    asset_args = [arg for arg in args if arg.endswith((".img.xz", "os-list.json", "SHA256SUMS"))]
-    assert len(asset_args) == 3
+    # Alle vier Assets werden übergeben (Image, Manifest, SHA256SUMS, Icon).
+    asset_args = [arg for arg in args if arg.endswith((".img.xz", "os-list.json", "SHA256SUMS", ".svg"))]
+    assert len(asset_args) == 4
 
 
 def test_verify_draft_assets_rejects_non_draft(monkeypatch):
@@ -177,6 +188,7 @@ def test_verify_draft_assets_accepts_matching_assets(monkeypatch):
                 {"name": "roboter-os-2026.09.9-headless.img.xz", "size": 1000},
                 {"name": "headless-os-list.json", "size": 500},
                 {"name": "SHA256SUMS", "size": 100},
+                {"name": "roboter-os.svg", "size": 50},
             ],
         })
         return github_release.subprocess.CompletedProcess(args, 0, payload, "")
@@ -184,7 +196,12 @@ def test_verify_draft_assets_accepts_matching_assets(monkeypatch):
     monkeypatch.setattr(github_release, "run_gh", fake_run_gh)
     github_release.verify_draft_assets(
         "image-2026.09.9",
-        {"roboter-os-2026.09.9-headless.img.xz", "headless-os-list.json", "SHA256SUMS"},
+        {
+            "roboter-os-2026.09.9-headless.img.xz",
+            "headless-os-list.json",
+            "SHA256SUMS",
+            "roboter-os.svg",
+        },
     )
 
 

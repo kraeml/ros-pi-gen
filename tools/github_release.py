@@ -82,14 +82,31 @@ def load_production_metadata(package_dir: Path) -> dict:
 def github_asset_paths(package_dir: Path, metadata: dict) -> dict[str, Path]:
     """Liefert die für dieses Headless-only-Produktionsrelease
     erforderlichen GitHub-Release-Assets: Image, variantenspezifisches
-    Manifest (headless-os-list.json) und SHA256SUMS. Rendert das
-    GitHub-Manifest frisch mit der versionierten Release-Asset-Basis-URL,
-    falls es im Paketverzeichnis noch nicht vorliegt."""
+    Manifest (headless-os-list.json), SHA256SUMS und das Imager-Icon
+    (roboter-os.svg). Rendert das GitHub-Manifest frisch mit der
+    versionierten Release-Asset-Basis-URL, falls es im Paketverzeichnis
+    noch nicht vorliegt.
+
+    Das Icon wird bewusst als eigenständiges 4. GitHub-Asset mit
+    hochgeladen (nicht nur auf S3): Das gepinnte Imager-V4-Schema verlangt
+    pro Manifest-Eintrag ein Pflichtfeld 'icon' (HTTP(S)-URL,
+    package_image.validate_manifest), und das GitHub-Release soll ein vom
+    S3-Bucket unabhängiges, vollständig eigenständiges zweites
+    Downloadziel sein -- ein auf die S3-Icon-URL verweisendes
+    GitHub-Manifest würde diese Unabhängigkeit unterlaufen.
+    package_image.write_github_manifest() rendert "icon" bereits relativ
+    zur übergebenen Basis-URL (also als GitHub-Release-Asset-URL), die
+    Icon-Datei muss dafür nur unter demselben Dateinamen (roboter-os.svg)
+    tatsächlich mit hochgeladen werden.
+    """
     variant = metadata["variant"]
     version = metadata["version"]
     image_path = package_dir / metadata["image_file"]
     if not image_path.is_file():
         raise GithubReleaseError(f"Image fehlt im Paket: {image_path}")
+    icon_path = package_dir / "roboter-os.svg"
+    if not icon_path.is_file():
+        raise GithubReleaseError(f"Imager-Icon fehlt im Paket: {icon_path}")
     manifest_name = package_image.github_manifest_name(variant)
     manifest_path = package_dir / manifest_name
     if not manifest_path.is_file():
@@ -107,6 +124,7 @@ def github_asset_paths(package_dir: Path, metadata: dict) -> dict[str, Path]:
         "image": image_path,
         "manifest": manifest_path,
         "sums": sums_path,
+        "icon": icon_path,
     }
 
 
@@ -149,7 +167,12 @@ def create_draft_release(package_dir: Path, metadata: dict) -> str:
     asset_paths = github_asset_paths(package_dir, metadata)
     check_asset_sizes(asset_paths)
     title = f"Roboter-OS {version} (Headless)"
-    assets = [str(asset_paths["image"]), str(asset_paths["manifest"]), str(asset_paths["sums"])]
+    assets = [
+        str(asset_paths["image"]),
+        str(asset_paths["manifest"]),
+        str(asset_paths["sums"]),
+        str(asset_paths["icon"]),
+    ]
     run_gh([
         "release", "create", tag,
         *assets,
