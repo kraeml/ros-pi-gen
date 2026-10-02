@@ -138,7 +138,6 @@ REQUIRED_SUBSTAGES = [
     "/pi-gen/stage2/02-net-tweaks",
     "/pi-gen/stage2/04-cloud-init",
     "/pi-gen/stage-custom/prerun.sh",
-    "/pi-gen/stage-custom/04-user-data/01-run.sh",
     "/pi-gen/stage-custom/05-docker-ansible/01-run.sh",
     "/pi-gen/stage-custom/05-docker-ansible/02-packages",
     "/pi-gen/stage-custom/05-docker-ansible/03-run.sh",

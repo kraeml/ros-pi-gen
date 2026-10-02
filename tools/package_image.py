@@ -24,6 +24,7 @@ PIN = json.loads(PIN_PATH.read_text())
 VARIANTS = {"headless": "Headless", "desktop": "Desktop"}
 IMAGE_PATTERN = re.compile(r"^image_(\d{4}-\d{2}-\d{2})-raspberrypi-trixie-custom-lite\.img\.xz$")
 TAG_PATTERN = re.compile(r"^image-(\d{4})\.(\d{2})\.(\d+)(-test)?$")
+PACKAGE_VERSION_PATTERN = re.compile(r"^(\d{4})\.(\d{2})\.(\d+)(-test)?$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CACHE = ROOT / ".cache" / "imager" / PIN["rpi_imager_commit"]
 
@@ -209,10 +210,23 @@ def audit_release_image(image: Path) -> None:
             user_data = pack.boot_dir / "user-data"
             if user_data.is_file():
                 content = user_data.read_text(errors="replace")
-                if quickfix_seed and content == quickfix_seed:
-                    raise PackageError("Quickfix-Seed user-data ist im Image enthalten")
-                if "plain_text_passwd: robot" in content or re.search(r"^\s*ssh_pwauth:\s*true\s*$", content, re.I | re.M):
-                    raise PackageError("Quickfix-Passwort oder Passwort-SSH ist im Image enthalten")
+                active_content = "\n".join(
+                    line for line in content.splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")
+                )
+                if quickfix_seed:
+                    active_seed = "\n".join(
+                        line for line in quickfix_seed.splitlines()
+                        if line.strip() and not line.lstrip().startswith("#")
+                    )
+                    if active_content == active_seed:
+                        raise PackageError("Aktiver Quickfix-Seed user-data ist im Image enthalten")
+                if re.search(r"^\s*plain_text_passwd:\s*robot\s*$", active_content, re.I | re.M):
+                    raise PackageError("Quickfix-Passwort ist im Image enthalten")
+                if re.search(r"^\s*ssh_pwauth:\s*true\s*$", active_content, re.I | re.M):
+                    raise PackageError("Passwort-SSH ist im Image aktiviert")
+                if re.search(r"^\s*-\s*name:\s*robot\s*$", active_content, re.I | re.M):
+                    raise PackageError("Quickfix-Benutzer robot ist im Image enthalten")
             passwd = rootfs / "etc/passwd"
             if passwd.is_file() and any(line.startswith("robot:") for line in passwd.read_text(errors="replace").splitlines()):
                 raise PackageError("Quickfix-Benutzer robot ist im Image vorhanden")
@@ -247,6 +261,8 @@ def render_manifest(metadata: dict, base_url: str) -> dict:
     status = metadata["status"]
     if status not in {"local-test", "test", "production"}:
         raise PackageError(f"Unbekannter Paketstatus: {status}")
+    if status == "local-test" and (metadata.get("version") is not None or metadata.get("tag") is not None):
+        raise PackageError("local-test-Pakete dürfen keinen Release-Tag oder keine Releaseversion enthalten")
     expected_image_name = f"roboter-os-{metadata['version'] or 'local-test'}-{variant}.img.xz"
     if metadata.get("image_file") != expected_image_name:
         raise PackageError("Image-Dateiname entspricht nicht der kanonischen Variante/Version")
@@ -255,14 +271,17 @@ def render_manifest(metadata: dict, base_url: str) -> dict:
     if status == "local-test" and metadata.get("version") is not None:
         raise PackageError("local-test-Pakete dürfen keine Releaseversion enthalten")
     if status in {"test", "production"}:
-        version_match = TAG_PATTERN.fullmatch(metadata.get("version", ""))
+        version_match = PACKAGE_VERSION_PATTERN.fullmatch(metadata.get("version", ""))
         if not version_match or (status == "test") != bool(version_match.group(4)):
-            raise PackageError("Test-/Produktionspakete benötigen eine zum Status passende Tagversion")
+            raise PackageError("Test-/Produktionspakete benötigen eine zum Status passende Paketversion")
+        if metadata.get("tag") != f"image-{metadata['version']}":
+            raise PackageError("Annotierter Tag stimmt nicht mit der Paketversion überein")
     if status == "local-test":
         display_name = f"Roboter-OS (Lokaler Test, nicht veröffentlichbar) ({VARIANTS[variant]})"
     else:
+        display_version = metadata["version"].removeprefix("image-")
         marker = " (Test)" if status == "test" else ""
-        display_name = f"Roboter-OS {metadata['version']}{marker} ({VARIANTS[variant]})"
+        display_name = f"Roboter-OS {display_version}{marker} ({VARIANTS[variant]})"
     icon_path = ROOT / "assets" / "roboter-os.svg"
     if not icon_path.is_file():
         raise PackageError("Imager-Icon fehlt: assets/roboter-os.svg")
@@ -291,17 +310,25 @@ def write_manifest(package_dir: Path, base_url: str) -> Path:
     variant = metadata.get("variant")
     if variant not in VARIANTS:
         raise PackageError(f"Unbekannte Paketvariante: {variant}")
+    if status == "local-test" and (metadata.get("version") is not None or metadata.get("tag") is not None):
+        raise PackageError("local-test-Pakete dürfen keinen Release-Tag oder keine Releaseversion enthalten")
     expected_image_name = f"roboter-os-{metadata.get('version') or 'local-test'}-{variant}.img.xz"
     if metadata.get("image_file") != expected_image_name:
         raise PackageError("Image-Dateiname entspricht nicht der kanonischen Variante/Version")
     if metadata.get("rpi_imager_commit") != PIN["rpi_imager_commit"]:
-        raise PackageError("Paketdaten wurden mit einem anderen Imager-Schema-Pin erzeugt")
-    if status == "local-test" and metadata.get("version") is not None:
-        raise PackageError("local-test-Pakete dürfen keine Releaseversion enthalten")
+        raise PackageError("Paketdaten wurden mit einem anderen Imager-Schema-Pin")
+    if status == "local-test" and (metadata.get("version") is not None or metadata.get("tag") is not None):
+        raise PackageError("local-test-Pakete dürfen keinen Release-Tag oder keine Releaseversion enthalten")
+
     if status in {"test", "production"}:
-        version_match = TAG_PATTERN.fullmatch(metadata.get("version", ""))
+        version_match = PACKAGE_VERSION_PATTERN.fullmatch(metadata.get("version", ""))
         if not version_match or (status == "test") != bool(version_match.group(4)):
-            raise PackageError("Test-/Produktionspakete benötigen eine zum Status passende Tagversion")
+            raise PackageError("Test-/Produktionspakete benötigen eine zum Status passende Paketversion")
+        if metadata.get("tag") != f"image-{metadata['version']}":
+            raise PackageError("Annotierter Tag stimmt nicht mit der Paketversion überein")
+        release_date = dt.date.fromisoformat(metadata.get("release_date", ""))
+        if (release_date.year, release_date.month) != (int(version_match.group(1)), int(version_match.group(2))):
+            raise PackageError("Paketversion passt nicht zu release_date")
     sums_path = package_dir / "SHA256SUMS"
     expected_sums = f"{metadata.get('image_download_sha256')}  {expected_image_name}\n"
     if not sums_path.is_file() or sums_path.read_text() != expected_sums:
@@ -348,6 +375,7 @@ def package_image(variant: str, deploy_dir: Path, output_dir: Path, base_url: st
         release_date = tag_date.isoformat()
     else:
         status = "local-test"
+        version = None
         release_date = build_date.isoformat()
     stage_skip = ROOT / "stage-custom" / "04-user-data" / "SKIP"
     if release_build and not stage_skip.is_file():
@@ -357,7 +385,8 @@ def package_image(variant: str, deploy_dir: Path, output_dir: Path, base_url: st
     if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
         raise PackageError(f"Paketverzeichnis ist nicht leer oder kein Verzeichnis: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    image_name = f"roboter-os-{version or 'local-test'}-{variant}.img.xz"
+    package_version = version.removeprefix("image-") if version else None
+    image_name = f"roboter-os-{package_version or 'local-test'}-{variant}.img.xz"
     output_image = output_dir / image_name
     shutil.copyfile(artifact, output_image)
     extracted_digest = hashlib.sha256()
@@ -373,7 +402,8 @@ def package_image(variant: str, deploy_dir: Path, output_dir: Path, base_url: st
     metadata = {
         "schema_version": 1,
         "status": status,
-        "version": version,
+        "version": package_version,
+        "tag": version,
         "variant": variant,
         "release_date": release_date,
         "source_artifact": artifact.name,
