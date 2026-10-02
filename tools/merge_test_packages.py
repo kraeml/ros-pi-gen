@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -15,8 +14,12 @@ sys.path.insert(0, str(ROOT / "tools"))
 import package_image
 
 
-
-VERSION_PATTERN = re.compile(r"^(\d{4})\.(\d{2})\.(\d+)-test$")
+# Wiederverwendung des in package_image.py gepinnten Versionsmusters, das
+# das optionale "-test"-Suffix bereits kennt (Gruppe 4). So bleibt die
+# Status/Suffix-Konsistenzprüfung hier identisch zu der in
+# package_image.render_manifest()/write_manifest() verwendeten Logik.
+VERSION_PATTERN = package_image.PACKAGE_VERSION_PATTERN
+ACCEPTED_STATUSES = {"test", "production"}
 
 
 class ReleasePackageError(RuntimeError):
@@ -24,6 +27,15 @@ class ReleasePackageError(RuntimeError):
 
 
 def merge_headless_package(headless_dir: Path, output_dir: Path) -> None:
+    """Fügt ein einzelnes Headless-Variantenpaket (Status test ODER
+    production) zu einem vollständigen Headless-only-Release-Paket
+    zusammen. Generisch für Gate-2/3-Testpakete (Status test, Version mit
+    -test-Suffix) und für die Headless-only-Übergangsregelung bei
+    Produktionsreleases (Status production, Version ohne -test-Suffix,
+    siehe AGENTS.md). Die Variante bleibt bewusst auf headless beschränkt,
+    solange Desktop nicht erfolgreich bereitgestellt ist; ein künftiger
+    Desktop-Merge braucht eine eigene, separat zu prüfende Erweiterung.
+    """
     source = headless_dir.resolve()
     output_dir = output_dir.resolve()
     if output_dir == source or output_dir in source.parents or source in output_dir.parents:
@@ -80,16 +92,27 @@ def merge_headless_package(headless_dir: Path, output_dir: Path) -> None:
 
 
 def validate_headless_package(package_dir: Path, metadata: dict) -> None:
+    status = metadata.get("status")
+    if status not in ACCEPTED_STATUSES:
+        raise ReleasePackageError(
+            f"Headless-Release-Merge akzeptiert nur Status {sorted(ACCEPTED_STATUSES)}, nicht {status!r}"
+        )
     version = metadata.get("version")
-    if not isinstance(version, str) or not VERSION_PATTERN.fullmatch(version):
-        raise ReleasePackageError("Gate 2 benötigt eine gültige YYYY.MM.PATCH-test-Paketversion")
+    version_match = VERSION_PATTERN.fullmatch(version) if isinstance(version, str) else None
+    if not version_match:
+        raise ReleasePackageError("Benötigt eine gültige YYYY.MM.PATCH[-test]-Paketversion")
+    # Statuskonsistenz: test <-> -test-Suffix, production <-> kein Suffix
+    # (identisch zur Logik in package_image.render_manifest()/write_manifest()).
+    if (status == "test") != bool(version_match.group(4)):
+        raise ReleasePackageError("Paketstatus und Versions-Suffix (-test) stimmen nicht zusammen")
     if metadata.get("tag") != f"image-{version}":
-        raise ReleasePackageError("Annotierter Test-Tag passt nicht zur Headless-Paketversion")
-    if metadata.get("variant") != "headless" or metadata.get("status") != "test":
-        raise ReleasePackageError("Gate-2-Ausnahme akzeptiert genau ein Paket mit Variante headless und Status test")
+        raise ReleasePackageError("Annotierter Tag passt nicht zur Headless-Paketversion")
+    if metadata.get("variant") != "headless":
+        raise ReleasePackageError(
+            "Headless-only-Übergangsregelung akzeptiert genau ein Paket mit Variante headless"
+        )
     date = dt.date.fromisoformat(metadata.get("release_date", ""))
-    match = VERSION_PATTERN.fullmatch(version)
-    if (date.year, date.month) != (int(match.group(1)), int(match.group(2))):
+    if (date.year, date.month) != (int(version_match.group(1)), int(version_match.group(2))):
         raise ReleasePackageError("Tagmonat stimmt nicht mit release_date überein")
     if metadata.get("rpi_imager_commit") != package_image.PIN["rpi_imager_commit"]:
         raise ReleasePackageError("Headless-Paket hat einen unerwarteten Imager-Schema-Pin")
@@ -114,7 +137,7 @@ def validate_headless_package(package_dir: Path, metadata: dict) -> None:
     except (OSError, json.JSONDecodeError) as error:
         raise ReleasePackageError("Headless-Imager-Manifest fehlt oder ist ungültig") from error
     if "imager" in manifest or not isinstance(manifest.get("os_list"), list) or len(manifest["os_list"]) != 1:
-        raise ReleasePackageError("Gate-2-Headless-Manifest muss genau einen Imager-Eintrag haben")
+        raise ReleasePackageError("Headless-Manifest muss genau einen Imager-Eintrag haben")
     schema_path, catalog_path = package_image.pinned_sources()
     try:
         package_image.validate_manifest(manifest, schema_path, catalog_path)
@@ -139,9 +162,9 @@ def main() -> int:
     try:
         merge_headless_package(args.headless_dir, args.output_dir)
     except (ReleasePackageError, package_image.PackageError, OSError, ValueError, json.JSONDecodeError) as error:
-        print(f"Headless-Testpaket fehlgeschlagen: {error}", file=sys.stderr)
+        print(f"Headless-Release-Paket fehlgeschlagen: {error}", file=sys.stderr)
         return 1
-    print(f"Headless-Gate-2-Testpaket erstellt: {args.output_dir}")
+    print(f"Headless-only-Release-Paket erstellt: {args.output_dir}")
     return 0
 
 
