@@ -1,0 +1,85 @@
+name: ci
+
+# Thin-Wrapper-Adapter (AGENTS.md, Etappe 4): dieser Workflow ruft
+# ausschließlich dieselben Make-Targets auf, die auch lokal laufen
+# (siehe README.md, Abschnitt "Was passiert im Hintergrund"). Keine
+# Build-/Test-Logik liegt im Workflow selbst.
+#
+# Umfang dieses Workflows (bewusst eingegrenzt, Headless-only-
+# Übergangsregelung, AGENTS.md Etappe 4): CI-Parität für Lint, Setup,
+# Build und Test der Variante headless bei jedem Push/PR. Kein
+# Release-Trigger, kein S3-Publish, kein GitHub-Release — die
+# Produktions-Publish-Logik (S3 status=production, GitHub-Release)
+# ist noch nicht implementiert und daher nicht Teil dieses Workflows.
+# Gate-2/3-Testveröffentlichungen erfolgen weiterhin ausschließlich
+# manuell/lokal über tools/publish-s3.sh (AGENTS.md).
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: make venv
+      - run: make lint
+
+  build-and-test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Runner-Disk ist knapp (~14 GB frei); der Build braucht work/
+      # (~3 GB) + Docker-Schichten + xz-Kompression. Bekannte sichere
+      # Räum-Kandidaten vorab entfernen (siehe GitHub-Image-Workflow.md,
+      # § 6 — Werte als Näherung, im ersten echten Lauf kalibrieren).
+      - name: Disk-Cleanup
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/share/swift /opt/hostedtoolcache/CodeQL || true
+          docker image prune -af || true
+          df -h /
+
+      - uses: docker/setup-qemu-action@v3
+
+      - run: make venv
+
+      - name: Setup (headless)
+        run: make setup VARIANT=headless
+
+      - name: Build (headless)
+        run: make build VARIANT=headless
+
+      - name: Test
+        run: make test
+
+      - name: Upload build log (immer)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-docker-log
+          path: deploy/build-docker.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload image (nur bei Erfolg)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: headless-image
+          path: deploy/image_*-raspberrypi-trixie-custom-lite.img.xz
+          retention-days: 7
+          if-no-files-found: ignore
