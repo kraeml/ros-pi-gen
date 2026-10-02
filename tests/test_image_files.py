@@ -117,11 +117,39 @@ def test_image_boot_cloudinit_template_inert(pack, name, erlaubte_schluessel):
     )
 
 
-def test_image_boot_user_data_is_inert_template(pack):
+def test_image_boot_user_data_matches_build_mode(pack):
+    """`boot/user-data` hat zwei gueltige, sich gegenseitig ausschliessende
+    Zustaende, je nachdem ob 04-user-data/SKIP beim Build gesetzt war
+    (RELEASE_BUILD=1, Standard fuer S3/GitHub-Veroeffentlichungen) oder
+    nicht (RELEASE_BUILD=0, Makefile-Default fuer lokale Dev-/CI-Builds,
+    siehe README-Schnellstart `make build`):
+
+    - aktiv (Quickfix): exakt der bekannte Platzhalter-Benutzer `robot`
+      mit Testpasswort/-SSH-Schluesseln (Übergangsloesung, siehe
+      README.md "Erster Benutzer")
+    - inert (Release): reines Kommentar-Template ohne aktive
+      Zugangsdaten (von tools/package_image.py:audit_release_image vor
+      jeder Veroeffentlichung zusaetzlich geprueft)
+
+    Ein Mischzustand (z. B. nur teilweise aktive Zeilen) ist in beiden
+    Faellen ein Fehler.
+    """
     text = (pack.boot_dir / "user-data").read_text()
     assert text.startswith("#cloud-config\n")
     active = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-    assert not any("plain_text_passwd:" in line for line in active)
-    assert not any("ssh_authorized_keys:" in line for line in active)
-    assert not any("ssh_pwauth: true" in line for line in active)
-    assert not any(line.lstrip().startswith("- name: robot") for line in active)
+    has_quickfix_markers = any("plain_text_passwd:" in line for line in active)
+    if has_quickfix_markers:
+        assert "- name: robot" in text
+        assert "groups: [adm, audio, cdrom, dialout, docker, games, gpio, i2c, input, lpadmin, netdev, plugdev, render, spi, sudo, users, video]" in text
+        assert "plain_text_passwd: robot" in text
+        assert text.count("ssh_authorized_keys:") == 1
+        assert text.count("      - \"ecdsa-sha2-nistp384 ") == 1
+        assert text.count("      - \"ssh-rsa ") == 1
+        assert "lock_passwd: false" in text
+        assert "ssh_pwauth: true" in text
+        assert "hostname:" not in text
+        assert "network:" not in text
+    else:
+        assert not any("ssh_authorized_keys:" in line for line in active)
+        assert not any("ssh_pwauth: true" in line for line in active)
+        assert not any(line.lstrip().startswith("- name: robot") for line in active)
