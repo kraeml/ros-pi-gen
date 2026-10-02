@@ -23,9 +23,15 @@
 > startbar sein (Thin-Wrapper-Prinzip, § 2).
 >
 > Geprüfter Stand: 22. September 2026. Remote:
-> `github.com/kraeml/ros-pi-gen` (Branch `develop`), noch kein
-> `.github/`-Verzeichnis (Lücke ist in [TODO.md](TODO.md), Block 3,
-> dokumentiert).
+> `github.com/kraeml/ros-pi-gen` (Branch `develop`).
+>
+> **Update 2026-10-02:** `.github/workflows/ci.yml` (Lint/Build/Test,
+> Push/PR) und `.github/workflows/ci-release.yml` (tag-getriggerter
+> Produktionsrelease-Workflow, Etappe 4) existieren inzwischen und folgen
+> der in AGENTS.md beschriebenen Struktur (S3 + GitHub als zwei
+> unabhängige Downloadziele, nicht GitHub-only wie unten skizziert). Die
+> Stufen A–E und das YAML in § 3/§ 4 sind historischer Erstentwurf und
+> stimmen nicht mehr mit der tatsächlichen Implementierung überein.
 
 ---
 
