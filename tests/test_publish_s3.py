@@ -217,6 +217,69 @@ def test_target_url_rejects_http_and_ambiguous_url():
         publish_s3.destination_url("https://example.invalid/bucket?public=1", "key")
 
 
+def test_resolve_target_accepts_known_tripels():
+    omv = publish_s3.resolve_target("s3-intern-admin", publish_s3.EXPECTED_ENDPOINT, "eu-central-1")
+    assert omv["name"] == "omv"
+    assert omv["write_approval_env"] == "ROS_PI_GEN_GATE2_WRITE_APPROVED"
+    hetzner = publish_s3.resolve_target("hetzner-prod", "https://hel1.your-objectstorage.com", "hel1")
+    assert hetzner["name"] == "hetzner"
+    assert hetzner["write_approval_env"] == "ROS_PI_GEN_GATE3_WRITE_APPROVED"
+
+
+def test_resolve_target_rejects_mixed_combinations():
+    with pytest.raises(publish_s3.PublishError, match="passen zu keinem bekannten Ziel"):
+        publish_s3.resolve_target("s3-intern-admin", "https://hel1.your-objectstorage.com", "hel1")
+    with pytest.raises(publish_s3.PublishError, match="passen zu keinem bekannten Ziel"):
+        publish_s3.resolve_target("hetzner-prod", publish_s3.EXPECTED_ENDPOINT, "eu-central-1")
+    with pytest.raises(publish_s3.PublishError, match="passen zu keinem bekannten Ziel"):
+        publish_s3.resolve_target("unknown-profile", "https://unknown.invalid", "nowhere")
+
+
+def test_publish_write_requires_explicit_hetzner_gate_approval(tmp_path, monkeypatch):
+    metadata = make_headless_test_package(tmp_path / "release")
+    monkeypatch.delenv("ROS_PI_GEN_GATE3_WRITE_APPROVED", raising=False)
+    monkeypatch.setattr(publish_s3, "validate_package", lambda path: metadata)
+    with pytest.raises(publish_s3.PublishError, match="nicht ausdrücklich freigegeben"):
+        publish_s3.publish_test_package(
+            tmp_path / "release",
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "https://example.invalid/bucket",
+        )
+
+
+def test_publish_hetzner_dry_run_never_contacts_aws(tmp_path, monkeypatch):
+    metadata = make_headless_test_package(tmp_path / "release")
+    monkeypatch.setattr(publish_s3, "validate_package", lambda path: metadata)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: pytest.fail("dry-run invoked S3"))
+    monkeypatch.setattr(publish_s3.package_image, "pinned_sources", lambda: (tmp_path / "schema", tmp_path / "catalog"))
+    monkeypatch.setattr(publish_s3.package_image, "validate_manifest", lambda *args: None)
+    publish_s3.publish_test_package(
+        tmp_path / "release",
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+        "https://example.invalid/bucket",
+        dry_run=True,
+    )
+
+
+def test_omv_gate2_approval_does_not_authorize_hetzner_write(tmp_path, monkeypatch):
+    metadata = make_headless_test_package(tmp_path / "release")
+    monkeypatch.setenv("ROS_PI_GEN_GATE2_WRITE_APPROVED", "yes")
+    monkeypatch.delenv("ROS_PI_GEN_GATE3_WRITE_APPROVED", raising=False)
+    monkeypatch.setattr(publish_s3, "validate_package", lambda path: metadata)
+    with pytest.raises(publish_s3.PublishError, match="nicht ausdrücklich freigegeben"):
+        publish_s3.publish_test_package(
+            tmp_path / "release",
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "https://example.invalid/bucket",
+        )
+
+
 def test_package_metadata_tag_must_match_version(tmp_path):
     package = tmp_path / "headless"
     make_variant_package(package, "headless")

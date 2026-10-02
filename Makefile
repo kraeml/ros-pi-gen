@@ -16,8 +16,8 @@
 # CONTINUE, PRESERVE_CONTAINER, CLEAN, SKIP_IMAGES_BUILD, APT_PROXY,
 # RELEASE_BUILD, BASE_URL, PACKAGE_DIR, HEADLESS_PACKAGE_DIR,
 # RELEASE_PACKAGE_DIR, CLEAN_RELEASE_STAGE,
-# S3_PROFILE,
-# S3_ENDPOINT, S3_REGION, S3_PUBLIC_BASE_URL, DRY_RUN
+# S3_TARGET (omv|hetzner), S3_PROFILE, S3_ENDPOINT, S3_REGION,
+# S3_PUBLIC_BASE_URL, DRY_RUN
 # (letzte: pi-gens SKIP_IMAGES-Mechanismus für schnelleren Iterationslauf,
 # siehe README, „Entwicklung: schnelle Iteration“).
 
@@ -40,10 +40,15 @@ BASE_URL ?=
 PACKAGE_DIR ?= $(REPO_ROOT)/package/$(VARIANT)
 HEADLESS_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-test
 RELEASE_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-release-test
-S3_PROFILE ?= s3-intern-admin
-S3_ENDPOINT ?= https://s3-intern.kraeml-bayern.de
-S3_REGION ?= eu-central-1
-S3_PUBLIC_BASE_URL ?= https://s3-intern.kraeml-bayern.de/ros-pi-gen-images
+# S3_TARGET waehlt die Zieldefaults in tools/publish-s3.sh (omv|hetzner);
+# S3_PROFILE/S3_ENDPOINT/S3_REGION/S3_PUBLIC_BASE_URL ueberschreiben bei
+# Bedarf einzeln, muessen aber zusammen zu einem der in publish_s3.py
+# gepinnten Ziel-Tripel passen (keine freie Kombination).
+S3_TARGET ?= omv
+S3_PROFILE ?=
+S3_ENDPOINT ?=
+S3_REGION ?=
+S3_PUBLIC_BASE_URL ?=
 DRY_RUN ?= 0
 SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schnelle Iteration")
 
@@ -82,7 +87,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test package package-release publish-s3-test clean-release-stage ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test package package-release publish-s3-test publish-s3-test-read-only-check clean-release-stage ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -100,7 +105,8 @@ help:
 	@echo "  make package                  Imager-Paket (BASE_URL explizit setzen)"
 	@echo "  make clean-release-stage CLEAN_RELEASE_STAGE=1  bestätigten Stale-Stage-Cache entfernen"
 	@echo "  make package-release          Headless-Testpaket für Gate 2 vorbereiten"
-	@echo "  make publish-s3-test          Testpaket nach ros-pi-gen-test/ publizieren (nur nach Freigaben)"
+	@echo "  make publish-s3-test S3_TARGET=omv|hetzner   Testpaket nach ros-pi-gen-test/ publizieren (nur nach Freigaben; Default omv)"
+	@echo "  make publish-s3-test-read-only-check S3_TARGET=omv|hetzner   Nur Lesezugriff pruefen, kein Upload"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
@@ -113,7 +119,7 @@ help:
 	@echo "  make vm-artifacts             deploy/ aus der VM holen (nach deploy/vm/)"
 	@echo "  make vm-halt|vm-destroy       VM anhalten / löschen · make vm-ci = ganze Kette"
 	@echo
-	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) SKIP_IMAGES_BUILD=$(SKIP_IMAGES_BUILD) RELEASE_BUILD=$(RELEASE_BUILD) BASE_URL=$(BASE_URL) PACKAGE_DIR=$(PACKAGE_DIR) RELEASE_PACKAGE_DIR=$(RELEASE_PACKAGE_DIR) S3_PROFILE=$(S3_PROFILE) S3_ENDPOINT=$(S3_ENDPOINT) S3_REGION=$(S3_REGION) S3_PUBLIC_BASE_URL=$(S3_PUBLIC_BASE_URL) DRY_RUN=$(DRY_RUN)"
+	@echo "Variablen: MODE=$(MODE) VARIANT=$(VARIANT) ENGINE=$(ENGINE) CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) CLEAN=$(CLEAN) VM_DISK=$(VM_DISK) VM_NAME=$(VM_NAME) VM_IP=$(VM_IP) SKIP_IMAGES_BUILD=$(SKIP_IMAGES_BUILD) RELEASE_BUILD=$(RELEASE_BUILD) BASE_URL=$(BASE_URL) PACKAGE_DIR=$(PACKAGE_DIR) RELEASE_PACKAGE_DIR=$(RELEASE_PACKAGE_DIR) S3_TARGET=$(S3_TARGET) S3_PROFILE=$(S3_PROFILE) S3_ENDPOINT=$(S3_ENDPOINT) S3_REGION=$(S3_REGION) S3_PUBLIC_BASE_URL=$(S3_PUBLIC_BASE_URL) DRY_RUN=$(DRY_RUN)"
 
 # --- venv (Datei-Abhängigkeit: requirements ändern sich -> neu installieren).
 # Stamp-Datei statt bin/python als Target: touch folgt dem venv-Symlink zum
@@ -225,7 +231,12 @@ package-release: venv
 	  "$(HEADLESS_PACKAGE_DIR)" "$(RELEASE_PACKAGE_DIR)"
 
 publish-s3-test: venv
-	@$(REPO_ROOT)/tools/publish-s3.sh "$(RELEASE_PACKAGE_DIR)" $(if $(filter 1,$(DRY_RUN)),--dry-run,)
+	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
+	  $(REPO_ROOT)/tools/publish-s3.sh "$(RELEASE_PACKAGE_DIR)" --target $(S3_TARGET) $(if $(filter 1,$(DRY_RUN)),--dry-run,)
+
+publish-s3-test-read-only-check: venv
+	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
+	  $(REPO_ROOT)/tools/publish-s3.sh --read-only-check --target $(S3_TARGET)
 
 # --- ci (Pipeline-Kette; Stufen wie GitHub-Image-Workflow.md, § 3) ----------
 ci: venv lint setup build test
