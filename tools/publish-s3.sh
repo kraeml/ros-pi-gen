@@ -1,31 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-  printf 'Usage: %s <release-package-dir> [--dry-run] | --read-only-check\n' "$0" >&2
+usage() {
+  printf 'Usage: %s <release-package-dir> [--target omv|hetzner] [--dry-run] | --read-only-check [--target omv|hetzner]\n' "$0" >&2
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
   exit 2
 fi
 
-if [[ "$1" != "--read-only-check" && $# -eq 2 && "$2" != "--dry-run" ]]; then
-  printf 'Unbekannte Option: %s\n' "$2" >&2
-  exit 2
-fi
+MODE=$1
+shift
+DRY_RUN=0
+TARGET=${S3_TARGET:-omv}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --target)
+      TARGET=$2
+      shift 2
+      ;;
+    *)
+      printf 'Unbekannte Option: %s\n' "$1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+case "$TARGET" in
+  omv)
+    PROFILE=${S3_PROFILE:-s3-intern-admin}
+    ENDPOINT=${S3_ENDPOINT:-https://s3-intern.kraeml-bayern.de}
+    REGION=${S3_REGION:-eu-central-1}
+    PUBLIC_BASE_URL=${S3_PUBLIC_BASE_URL:-https://s3-intern.kraeml-bayern.de/ros-pi-gen-images}
+    ;;
+  hetzner)
+    PROFILE=${S3_PROFILE:-hetzner-prod}
+    ENDPOINT=${S3_ENDPOINT:-https://hel1.your-objectstorage.com}
+    REGION=${S3_REGION:-hel1}
+    PUBLIC_BASE_URL=${S3_PUBLIC_BASE_URL:-https://hel1.your-objectstorage.com/ros-pi-gen-images}
+    ;;
+  *)
+    printf 'Unbekanntes --target: %s (erlaubt: omv, hetzner)\n' "$TARGET" >&2
+    exit 2
+    ;;
+esac
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-PROFILE=${S3_PROFILE:-s3-intern-admin}
-ENDPOINT=${S3_ENDPOINT:-https://s3-intern.kraeml-bayern.de}
-REGION=${S3_REGION:-eu-central-1}
-PUBLIC_BASE_URL=${S3_PUBLIC_BASE_URL:-https://s3-intern.kraeml-bayern.de/ros-pi-gen-images}
-ARGS=("$1" --profile "$PROFILE" --endpoint "$ENDPOINT" --region "$REGION" --public-base-url "$PUBLIC_BASE_URL")
-if [[ "$1" == "--read-only-check" ]]; then
-  if [[ $# -ne 1 ]]; then
-    printf 'Usage: %s --read-only-check\n' "$0" >&2
-    exit 2
-  fi
+
+if [[ "$MODE" == "--read-only-check" ]]; then
   ARGS=(--read-only-check --profile "$PROFILE" --endpoint "$ENDPOINT" --region "$REGION" --public-base-url "$PUBLIC_BASE_URL")
 else
-  ARGS=("$1" --profile "$PROFILE" --endpoint "$ENDPOINT" --region "$REGION" --public-base-url "$PUBLIC_BASE_URL")
-  if [[ $# -eq 2 ]]; then
+  ARGS=("$MODE" --profile "$PROFILE" --endpoint "$ENDPOINT" --region "$REGION" --public-base-url "$PUBLIC_BASE_URL")
+  if [[ "$DRY_RUN" == "1" ]]; then
     ARGS+=(--dry-run)
   fi
 fi

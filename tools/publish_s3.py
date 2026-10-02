@@ -18,10 +18,36 @@ import package_image
 
 BUCKET = "ros-pi-gen-images"
 TEST_PREFIX = "ros-pi-gen-test"
-EXPECTED_TEST_PROFILE = "s3-intern-admin"
-EXPECTED_ENDPOINT = "https://s3-intern.kraeml-bayern.de"
-DEFAULT_PUBLIC_BASE_URL = "https://s3-intern.kraeml-bayern.de/ros-pi-gen-images"
-EXPECTED_REGION = "eu-central-1"
+
+# Ziel-Allowlist: Profil+Endpoint+Region müssen als zusammengehöriges
+# Tripel auf genau einen Eintrag passen (kein freies Mischen, z. B. kein
+# OMV-Profil mit Hetzner-Endpoint). Jedes Ziel hat einen eigenen
+# Freigabeschalter (ENV-Variable), damit eine für ein Ziel erteilte
+# Freigabe nicht versehentlich einen Upload zum anderen Ziel auslöst.
+TARGETS = {
+    "omv": {
+        "profile": "s3-intern-admin",
+        "endpoint": "https://s3-intern.kraeml-bayern.de",
+        "region": "eu-central-1",
+        "default_public_base_url": "https://s3-intern.kraeml-bayern.de/ros-pi-gen-images",
+        "write_approval_env": "ROS_PI_GEN_GATE2_WRITE_APPROVED",
+    },
+    "hetzner": {
+        "profile": "hetzner-prod",
+        "endpoint": "https://hel1.your-objectstorage.com",
+        "region": "hel1",
+        # Path-Style angenommen (analog zur bestätigten OMV-Installation);
+        # gemäß AGENTS.md vor dem ersten echten Schreibzugriff anonym
+        # verifizieren ("Keine Basis-URL raten") und ggf. korrigieren.
+        "default_public_base_url": "https://hel1.your-objectstorage.com/ros-pi-gen-images",
+        "write_approval_env": "ROS_PI_GEN_GATE3_WRITE_APPROVED",
+    },
+}
+# Rückwärtskompatible Aliase für bestehende Aufrufer/Tests (Gate-2-Ziel).
+EXPECTED_TEST_PROFILE = TARGETS["omv"]["profile"]
+EXPECTED_ENDPOINT = TARGETS["omv"]["endpoint"]
+EXPECTED_REGION = TARGETS["omv"]["region"]
+DEFAULT_PUBLIC_BASE_URL = TARGETS["omv"]["default_public_base_url"]
 VERSION_PATTERN = re.compile(r"^(\d{4})\.(\d{2})\.(\d+)-test$")
 REQUIRED_PACKAGE_FILES = {
     "package.json",
@@ -34,6 +60,21 @@ REQUIRED_PACKAGE_FILES = {
 
 class PublishError(RuntimeError):
     pass
+
+
+def resolve_target(profile: str, endpoint: str, region: str) -> dict:
+    """Findet den Zielnamen, dessen Profil+Endpoint+Region exakt dem
+    übergebenen Tripel entspricht. Kein Eintrag passt -> PublishError
+    (keine freie Kombination erlaubt, kein Raten einer Basis-URL)."""
+    for name, target in TARGETS.items():
+        if (target["profile"], target["endpoint"], target["region"]) == (profile, endpoint, region):
+            return {"name": name, **target}
+    allowed = ", ".join(
+        f"{t['profile']}/{t['endpoint']}/{t['region']}" for t in TARGETS.values()
+    )
+    raise PublishError(
+        f"Profil/Endpoint/Region passen zu keinem bekannten Ziel (erlaubt: {allowed})"
+    )
 
 
 def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_failure: bool = False) -> subprocess.CompletedProcess:
@@ -230,10 +271,12 @@ def publish_test_package(
     *,
     dry_run: bool = False,
 ) -> None:
-    if profile != EXPECTED_TEST_PROFILE or endpoint != EXPECTED_ENDPOINT or region != EXPECTED_REGION:
-        raise PublishError("Gate-2 verlangt unverändert das Profil s3-intern-admin, den dokumentierten Endpoint und eu-central-1")
-    if not dry_run and os.environ.get("ROS_PI_GEN_GATE2_WRITE_APPROVED") != "yes":
-        raise PublishError("Gate-2-S3-Schreibzugriff ist noch nicht ausdrücklich freigegeben")
+    target = resolve_target(profile, endpoint, region)
+    if not dry_run and os.environ.get(target["write_approval_env"]) != "yes":
+        raise PublishError(
+            f"S3-Schreibzugriff für Ziel '{target['name']}' ist noch nicht ausdrücklich freigegeben "
+            f"({target['write_approval_env']}=yes erforderlich)"
+        )
     metadata = validate_package(package_dir)
     version = metadata["version"]
     if metadata.get("variant") != "headless":
@@ -370,8 +413,7 @@ def main() -> int:
         if args.read_only_check:
             if args.package_dir is not None:
                 raise PublishError("--read-only-check akzeptiert kein Paketverzeichnis")
-            if args.profile != EXPECTED_TEST_PROFILE or args.endpoint != EXPECTED_ENDPOINT or args.region != EXPECTED_REGION:
-                raise PublishError("Gate-2 verlangt unverändert das Profil s3-intern-admin, den dokumentierten Endpoint und eu-central-1")
+            resolve_target(args.profile, args.endpoint, args.region)
             keys = list_version_objects(
                 args.profile,
                 args.endpoint,
@@ -383,14 +425,16 @@ def main() -> int:
         if args.package_dir is None:
             raise PublishError("Paketverzeichnis fehlt")
         metadata = validate_package(args.package_dir)
+        target = resolve_target(args.profile, args.endpoint, args.region)
         if args.dry_run:
-            if args.profile != EXPECTED_TEST_PROFILE or args.endpoint != EXPECTED_ENDPOINT or args.region != EXPECTED_REGION:
-                raise PublishError("Gate-2 verlangt unverändert das Profil s3-intern-admin, den dokumentierten Endpoint und eu-central-1")
             if not args.public_base_url.startswith("https://"):
                 raise PublishError("Dry-Run benötigt eine plausible HTTPS-Basis-URL, ändert aber keine Bucket-Objekte")
         else:
-            if os.environ.get("ROS_PI_GEN_GATE2_WRITE_APPROVED") != "yes":
-                raise PublishError("Gate-2-S3-Schreibzugriff ist noch nicht ausdrücklich freigegeben")
+            if os.environ.get(target["write_approval_env"]) != "yes":
+                raise PublishError(
+                    f"S3-Schreibzugriff für Ziel '{target['name']}' ist noch nicht ausdrücklich freigegeben "
+                    f"({target['write_approval_env']}=yes erforderlich)"
+                )
         publish_test_package(
             args.package_dir,
             args.profile,
@@ -402,7 +446,7 @@ def main() -> int:
     except (PublishError, package_image.PackageError, OSError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         print(f"S3-Testveröffentlichung abgebrochen: {error}", file=sys.stderr)
         return 1
-    print("Gate-2-Testpaket veröffentlicht und geprüft.")
+    print("Testpaket veröffentlicht und geprüft.")
     return 0
 
 
