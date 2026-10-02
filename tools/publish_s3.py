@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -113,6 +114,63 @@ def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_
         details = result.stderr.strip() or result.stdout.strip()
         raise PublishError(f"AWS CLI-Leseprüfung fehlgeschlagen ({result.returncode}): {details}")
     return result
+
+
+# Nach-Upload-Downloadverifikation braucht robustere Netzwerk-Defaults als
+# der Rest des Publishers: bei einem Headless-Image von ~800 MB reicht das
+# AWS-CLI-Standardtimeout nicht immer aus und ein einzelner transienter
+# Verbindungsabbruch (z. B. "IncompleteRead") darf nicht sofort den
+# gesamten Produktions-/Test-Publish-Lauf abbrechen (AGENTS.md: bei einem
+# Teilfehler die Version nicht erneut verwenden -- ein robuster Download
+# verringert, wie oft dieser Fall überhaupt eintritt). Download-Timeout
+# bewusst deutlich höher als das Standard-CLI-Timeout (60s); Anzahl und
+# Basis-Backoff über Konstanten statt Magic-Numbers im Aufruf.
+DOWNLOAD_VERIFY_MAX_ATTEMPTS = 3
+DOWNLOAD_VERIFY_BACKOFF_SECONDS = 5
+DOWNLOAD_VERIFY_CLI_READ_TIMEOUT = 600
+DOWNLOAD_VERIFY_CLI_CONNECT_TIMEOUT = 60
+
+
+def download_for_verification(
+    key: str,
+    destination: Path,
+    profile: str,
+    endpoint: str,
+    region: str,
+    *,
+    error_prefix: str,
+) -> None:
+    """Lädt ein zuvor hochgeladenes Objekt zur Prüfsummenverifikation
+    erneut herunter -- mit erhöhten CLI-Timeouts und begrenzten
+    Wiederholungen mit Backoff, da ein einzelner transienter
+    Verbindungsabbruch (beobachtet: 'IncompleteRead' bei einem ~800-MB-
+    Headless-Image) sonst den gesamten Publish-Lauf ohne Not abbricht.
+    Ein partiell geschriebenes Ziel wird vor jedem Versuch entfernt, damit
+    kein angebrochener Download fälschlich als vollständig geprüft wird."""
+    last_error: PublishError | None = None
+    for attempt in range(1, DOWNLOAD_VERIFY_MAX_ATTEMPTS + 1):
+        destination.unlink(missing_ok=True)
+        try:
+            run_aws(
+                [
+                    "s3", "cp", f"s3://{BUCKET}/{key}", str(destination), "--no-progress",
+                    "--cli-read-timeout", str(DOWNLOAD_VERIFY_CLI_READ_TIMEOUT),
+                    "--cli-connect-timeout", str(DOWNLOAD_VERIFY_CLI_CONNECT_TIMEOUT),
+                ],
+                profile,
+                endpoint,
+                region,
+            )
+            return
+        except PublishError as error:
+            last_error = error
+            if attempt < DOWNLOAD_VERIFY_MAX_ATTEMPTS:
+                time.sleep(DOWNLOAD_VERIFY_BACKOFF_SECONDS * attempt)
+    destination.unlink(missing_ok=True)
+    raise PublishError(
+        f"{error_prefix}-Downloadverifikation nach {DOWNLOAD_VERIFY_MAX_ATTEMPTS} Versuchen "
+        f"fehlgeschlagen: {last_error}"
+    )
 
 
 def _validate_headless_package(
@@ -386,12 +444,7 @@ def publish_test_package(
         )
         item = metadata
         remote_image = temp_dir / f"download-{image_name}"
-        run_aws(
-            ["s3", "cp", f"s3://{BUCKET}/{image_key}", str(remote_image), "--no-progress"],
-            profile,
-            endpoint,
-            region,
-        )
+        download_for_verification(image_key, remote_image, profile, endpoint, region, error_prefix="Gate-2/3")
         if package_image.sha256_file(remote_image) != item["image_download_sha256"]:
             raise PublishError("Nach Upload geladene Prüfsumme stimmt für Headless nicht")
         run_aws(
@@ -544,12 +597,7 @@ def publish_production_image(
             region,
         )
         remote_image = temp_dir / f"download-{image_name}"
-        run_aws(
-            ["s3", "cp", f"s3://{BUCKET}/{image_key}", str(remote_image), "--no-progress"],
-            profile,
-            endpoint,
-            region,
-        )
+        download_for_verification(image_key, remote_image, profile, endpoint, region, error_prefix="Produktions")
         if package_image.sha256_file(remote_image) != metadata["image_download_sha256"]:
             raise PublishError("Nach Upload geladene Prüfsumme stimmt für Headless nicht")
         run_aws(

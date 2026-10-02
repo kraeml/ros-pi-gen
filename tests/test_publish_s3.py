@@ -611,3 +611,87 @@ def test_package_metadata_tag_must_match_version(tmp_path):
     metadata_path.write_text(json.dumps(metadata))
     with pytest.raises(package_image.PackageError, match="Tag"):
         package_image.write_manifest(package, "https://test.example/headless/")
+
+
+def test_download_for_verification_retries_on_transient_failure(tmp_path, monkeypatch):
+    """Regressionstest für den realen Gate-4-Produktionslauf
+    (image-2026.10.1): ein einzelner 'IncompleteRead'-Verbindungsabbruch
+    beim Nach-Upload-Download darf nicht sofort den gesamten Publish-Lauf
+    abbrechen -- der Download muss mit begrenzten Wiederholungen erneut
+    versucht werden."""
+    calls = []
+
+    def fake_run_aws(args, profile, endpoint, region, **kwargs):
+        calls.append(args)
+        if len(calls) < 3:
+            raise publish_s3.PublishError(
+                "AWS CLI fehlgeschlagen (1): download failed: ... IncompleteRead(...)"
+            )
+        Path(args[3]).write_bytes(b"ok")
+        return publish_s3.subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    monkeypatch.setattr(publish_s3.time, "sleep", lambda seconds: None)
+    destination = tmp_path / "download.img.xz"
+    publish_s3.download_for_verification(
+        "ros-pi-gen/releases/2026.10.1/roboter-os-2026.10.1-headless.img.xz",
+        destination,
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+        error_prefix="Produktions",
+    )
+    assert len(calls) == 3
+    assert destination.read_bytes() == b"ok"
+    # Jeder Versuch nutzt erhöhte CLI-Timeouts, nicht die Default-Werte.
+    assert "--cli-read-timeout" in calls[0]
+    assert "--cli-connect-timeout" in calls[0]
+
+
+def test_download_for_verification_gives_up_after_max_attempts(tmp_path, monkeypatch):
+    def fake_run_aws(args, profile, endpoint, region, **kwargs):
+        # Partiellen Download simulieren, der vor dem nächsten Versuch
+        # entfernt werden muss (kein angebrochener Rest darf als
+        # vollständig geprüft werden).
+        Path(args[3]).write_bytes(b"partial")
+        raise publish_s3.PublishError("IncompleteRead")
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    monkeypatch.setattr(publish_s3.time, "sleep", lambda seconds: None)
+    destination = tmp_path / "download.img.xz"
+    with pytest.raises(publish_s3.PublishError, match="Downloadverifikation nach 3 Versuchen"):
+        publish_s3.download_for_verification(
+            "ros-pi-gen/releases/2026.10.1/roboter-os-2026.10.1-headless.img.xz",
+            destination,
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            error_prefix="Produktions",
+        )
+    # Kein liegengebliebenes Partial-Objekt nach endgültigem Scheitern.
+    assert not destination.exists()
+
+
+def test_download_for_verification_removes_stale_partial_before_retry(tmp_path, monkeypatch):
+    destination = tmp_path / "download.img.xz"
+    destination.write_bytes(b"stale-leftover-from-previous-attempt")
+    calls = []
+
+    def fake_run_aws(args, profile, endpoint, region, **kwargs):
+        calls.append(args)
+        # Beim ersten Aufruf darf das alte Partial nicht mehr da sein.
+        assert not Path(args[3]).exists()
+        Path(args[3]).write_bytes(b"complete")
+        return publish_s3.subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    publish_s3.download_for_verification(
+        "ros-pi-gen/releases/2026.10.1/roboter-os-2026.10.1-headless.img.xz",
+        destination,
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+        error_prefix="Produktions",
+    )
+    assert len(calls) == 1
+    assert destination.read_bytes() == b"complete"
