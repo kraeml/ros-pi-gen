@@ -108,7 +108,12 @@ def test_build_info_rejects_ambiguous_artifacts(tmp_path):
 def test_pinned_sources_match_declared_hashes():
     schema_path, catalog_path = package_image.pinned_sources()
     assert package_image.sha256_file(schema_path) == package_image.PIN["schema_sha256"]
-    assert package_image.sha256_file(catalog_path) == package_image.PIN["device_catalog_sha256"]
+    # Nur der stabile imager.devices-Teilblock ist gepinnt, nicht die
+    # Gesamtdatei (die enthält eine täglich wechselnde OS-Liste).
+    catalog = json.loads(catalog_path.read_text())
+    devices_payload = json.dumps(catalog["imager"]["devices"], sort_keys=True, ensure_ascii=False).encode()
+    import hashlib
+    assert hashlib.sha256(devices_payload).hexdigest() == package_image.PIN["device_catalog_devices_sha256"]
 
 
 def test_manifest_enforces_schema_and_device_tag_rules():

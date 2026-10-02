@@ -31,6 +31,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      # make lint führt bereits arm64-Container-Tests aus
+      # (test_hostname_ssid.py, debian:trixie), nicht erst make build —
+      # ohne registrierten arm64-Interpreter scheitert das auf dem
+      # amd64-Runner mit "exec format error".
+      - uses: docker/setup-qemu-action@v3
       - run: make venv
       - run: make lint
 

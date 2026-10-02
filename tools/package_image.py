@@ -62,6 +62,57 @@ def fetch_pinned(url: str, target: Path, expected: str) -> Path:
     return target
 
 
+def fetch_device_catalog(url: str, target: Path, expected_devices_sha256: str) -> Path:
+    """Lädt den offiziellen Imager-Gerätekatalog und pinnt nur den stabilen
+    `imager.devices`-Teilblock per SHA-256 — nicht die Gesamtdatei.
+
+    Die Datei unter `device_catalog_url` ist kein stabiles Release-Artefakt:
+    sie enthält neben den Geräte-Metadaten auch die komplette, täglich neu
+    generierte OS-Liste (u. a. Nightly-Builds), die sich faktisch jeden Tag
+    ändert (siehe AGENTS.md § „devices-Tags" — nur die Gerätetags müssen
+    verifiziert werden). Ein SHA-256-Pin auf die Gesamtdatei würde daher bei
+    jedem frischen Abruf ohne lokalen Cache zuverlässig fehlschlagen (beob.
+    2026-10-02: identischer `imager.devices`-Block, aber geänderter
+    Gesamt-Hash durch Nightly-Einträge). Gepinnt wird stattdessen der
+    deterministisch (sort_keys) serialisierte `devices`-Block.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file():
+        try:
+            cached_devices = json.loads(target.read_text()).get("imager", {}).get("devices")
+        except (OSError, json.JSONDecodeError):
+            cached_devices = None
+        if isinstance(cached_devices, list) and cached_devices:
+            cached_payload = json.dumps(cached_devices, sort_keys=True, ensure_ascii=False).encode()
+            if hashlib.sha256(cached_payload).hexdigest() == expected_devices_sha256:
+                return target
+    temporary = target.with_suffix(target.suffix + ".part")
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "ros-pi-gen-package/1"})
+        with urllib.request.urlopen(request, timeout=45) as response, temporary.open("wb") as output:
+            shutil.copyfileobj(response, output)
+        try:
+            catalog = json.loads(temporary.read_text())
+        except json.JSONDecodeError as error:
+            raise PackageError(f"Gerätekatalog ist kein gültiges JSON: {url}") from error
+        devices = catalog.get("imager", {}).get("devices")
+        if not isinstance(devices, list) or not devices:
+            raise PackageError(f"Gerätekatalog enthält keinen imager.devices-Block: {url}")
+        payload = json.dumps(devices, sort_keys=True, ensure_ascii=False).encode()
+        actual = hashlib.sha256(payload).hexdigest()
+        if actual != expected_devices_sha256:
+            raise PackageError(
+                f"SHA-256 des imager.devices-Blocks stimmt nicht: {url} ({actual})"
+            )
+        temporary.replace(target)
+    except (OSError, urllib.error.URLError) as error:
+        temporary.unlink(missing_ok=True)
+        raise PackageError(f"Gepinnte Imager-Quelle nicht abrufbar: {url}: {error}") from error
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 def pinned_sources() -> tuple[Path, Path]:
     commit = PIN["rpi_imager_commit"]
     schema = fetch_pinned(
@@ -69,10 +120,10 @@ def pinned_sources() -> tuple[Path, Path]:
         CACHE / "os-list-schema.json",
         PIN["schema_sha256"],
     )
-    catalog = fetch_pinned(
+    catalog = fetch_device_catalog(
         PIN["device_catalog_url"],
         CACHE / "os_list_imagingutility_v4.json",
-        PIN["device_catalog_sha256"],
+        PIN["device_catalog_devices_sha256"],
     )
     return schema, catalog
 

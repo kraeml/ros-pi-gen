@@ -3,7 +3,7 @@
   "schema_path": "doc/json-schema/os-list-schema.json",
   "schema_sha256": "c3e323aa297e9ef3f386f522abb4497db5eb9a1ca5f7f3c7a3b1f9a75862ac85",
   "device_catalog_url": "https://downloads.raspberrypi.org/os_list_imagingutility_v4.json",
-  "device_catalog_sha256": "b898a13c78d13288feeb09eb940ac16bf285acd33181e9fc591be2f22a13c4cf",
+  "device_catalog_devices_sha256": "4c2af2e0fa39eb1421dc7d825658287735129c13efc49843eb5184ee127f1e3a",
   "required_device_tags": [
     "pi3-64bit",
     "pi4-64bit",

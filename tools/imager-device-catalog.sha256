@@ -1,1 +1,8 @@
-b898a13c78d13288feeb09eb940ac16bf285acd33181e9fc591be2f22a13c4cf  os_list_imagingutility_v4.json
+# Hinweis: os_list_imagingutility_v4.json ist kein stabiles Artefakt (sie
+# enthält die komplette, täglich wechselnde offizielle OS-Liste inkl.
+# Nightly-Builds). Gepinnt wird daher nur der SHA-256 des deterministisch
+# serialisierten imager.devices-Teilblocks (siehe
+# tools/imager-schema-pin.json, Feld device_catalog_devices_sha256, und
+# tools/package_image.py:fetch_device_catalog). Dieser Hash hier dient nur
+# als menschenlesbarer Beleg, nicht als vom Code gelesene Quelle.
+4c2af2e0fa39eb1421dc7d825658287735129c13efc49843eb5184ee127f1e3a  imager.devices (sort_keys-JSON)
