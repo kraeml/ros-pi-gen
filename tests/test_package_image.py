@@ -57,6 +57,110 @@ def test_local_package_metadata_and_manifest(tmp_path, monkeypatch):
         package_image.write_manifest(output, "http://127.0.0.1:8000/")
 
 
+def test_render_sha256sums_formats_single_entry_like_existing_packages():
+    content = package_image.render_sha256sums({"roboter-os-2026.09.1-headless.img.xz": "a" * 64})
+    assert content == f"{'a' * 64}  roboter-os-2026.09.1-headless.img.xz\n"
+
+
+def test_render_sha256sums_sorts_multiple_entries_by_filename():
+    content = package_image.render_sha256sums({
+        "roboter-os-2026.09.1-desktop.img.xz": "b" * 64,
+        "roboter-os-2026.09.1-headless.img.xz": "a" * 64,
+    })
+    assert content == (
+        f"{'b' * 64}  roboter-os-2026.09.1-desktop.img.xz\n"
+        f"{'a' * 64}  roboter-os-2026.09.1-headless.img.xz\n"
+    )
+
+
+def test_render_sha256sums_rejects_invalid_hash_or_empty_input():
+    with pytest.raises(package_image.PackageError):
+        package_image.render_sha256sums({})
+    with pytest.raises(package_image.PackageError):
+        package_image.render_sha256sums({"image.img.xz": "not-a-hash"})
+
+
+def test_write_manifest_accepts_custom_output_name_for_github_assets(tmp_path, monkeypatch):
+    source = tmp_path / "sample.img.xz"
+    image_bytes = b"small test image"
+    source.write_bytes(lzma.compress(image_bytes))
+    output = tmp_path / "package"
+    output.mkdir()
+    metadata = {
+        "status": "production",
+        "version": "2026.09.1",
+        "tag": "image-2026.09.1",
+        "variant": "headless",
+        "release_date": "2026-09-01",
+        "image_file": "roboter-os-2026.09.1-headless.img.xz",
+        "image_download_size": source.stat().st_size,
+        "image_download_sha256": package_image.sha256_file(source),
+        "extract_size": len(image_bytes),
+        "extract_sha256": "1" * 64,
+        "rpi_imager_commit": package_image.PIN["rpi_imager_commit"],
+    }
+    monkeypatch.setattr(package_image, "pinned_sources", lambda: (tmp_path / "schema", tmp_path / "catalog"))
+    monkeypatch.setattr(package_image, "validate_manifest", lambda *args: None)
+    (output / "package.json").write_text(json.dumps(metadata))
+    (output / metadata["image_file"]).write_bytes(source.read_bytes())
+    (output / "SHA256SUMS").write_text(
+        f"{metadata['image_download_sha256']}  {metadata['image_file']}\n"
+    )
+    result = package_image.write_manifest(
+        output,
+        "https://github.com/kraeml/ros-pi-gen/releases/download/image-2026.09.1/",
+        output_name="headless-os-list.json",
+    )
+    assert result.name == "headless-os-list.json"
+    assert not (output / "os-list.json").exists()
+    manifest = json.loads(result.read_text())
+    entry = manifest["os_list"][0]
+    assert entry["url"] == (
+        "https://github.com/kraeml/ros-pi-gen/releases/download/image-2026.09.1/"
+        "roboter-os-2026.09.1-headless.img.xz"
+    )
+
+
+def test_github_manifest_name_is_variant_prefixed():
+    assert package_image.github_manifest_name("headless") == "headless-os-list.json"
+    assert package_image.github_manifest_name("desktop") == "desktop-os-list.json"
+    with pytest.raises(package_image.PackageError):
+        package_image.github_manifest_name("unknown")
+
+
+def test_write_github_manifest_uses_variant_prefixed_filename(tmp_path, monkeypatch):
+    source = tmp_path / "sample.img.xz"
+    image_bytes = b"small test image"
+    source.write_bytes(lzma.compress(image_bytes))
+    output = tmp_path / "package"
+    output.mkdir()
+    metadata = {
+        "status": "production",
+        "version": "2026.09.1",
+        "tag": "image-2026.09.1",
+        "variant": "headless",
+        "release_date": "2026-09-01",
+        "image_file": "roboter-os-2026.09.1-headless.img.xz",
+        "image_download_size": source.stat().st_size,
+        "image_download_sha256": package_image.sha256_file(source),
+        "extract_size": len(image_bytes),
+        "extract_sha256": "1" * 64,
+        "rpi_imager_commit": package_image.PIN["rpi_imager_commit"],
+    }
+    monkeypatch.setattr(package_image, "pinned_sources", lambda: (tmp_path / "schema", tmp_path / "catalog"))
+    monkeypatch.setattr(package_image, "validate_manifest", lambda *args: None)
+    (output / "package.json").write_text(json.dumps(metadata))
+    (output / metadata["image_file"]).write_bytes(source.read_bytes())
+    (output / "SHA256SUMS").write_text(
+        f"{metadata['image_download_sha256']}  {metadata['image_file']}\n"
+    )
+    result = package_image.write_github_manifest(
+        output,
+        "https://github.com/kraeml/ros-pi-gen/releases/download/image-2026.09.1/",
+    )
+    assert result.name == "headless-os-list.json"
+
+
 @pytest.mark.parametrize("base_url", ["", "ftp://example.org/", "http://localhost:80/?x=1", "http://localhost/#frag"])
 def test_local_renderer_rejects_invalid_base_url(tmp_path, base_url):
     metadata = {

@@ -51,6 +51,39 @@ def make_variant_package(directory: Path, variant: str, version: str = TEST_VERS
     return metadata
 
 
+def write_headless_package_files(directory: Path, version: str, status: str) -> dict:
+    """Schreibt ein Headless-Paket direkt auf Dateiebene, ohne den Weg über
+    package_image.render_manifest() zu nehmen. Wird ausschließlich für
+    Tests benötigt, die eine *inkonsistente* Status/Versions-Suffix-
+    Kombination erzeugen wollen (render_manifest würde diese bereits vor
+    merge_test_packages.validate_headless_package() zurückweisen)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    image_name = f"roboter-os-{version}-headless.img.xz"
+    image_content = b"image-content-headless"
+    (directory / image_name).write_bytes(image_content)
+    image_hash = hashlib.sha256(image_content).hexdigest()
+    metadata = {
+        "schema_version": 1,
+        "status": status,
+        "version": version,
+        "tag": f"image-{version}",
+        "variant": "headless",
+        "release_date": RELEASE_DATE,
+        "source_artifact": "build.img.xz",
+        "image_file": image_name,
+        "image_download_size": len(image_content),
+        "image_download_sha256": image_hash,
+        "extract_size": 4096,
+        "extract_sha256": "a" * 64,
+        "rpi_imager_commit": package_image.PIN["rpi_imager_commit"],
+    }
+    (directory / "package.json").write_text(json.dumps(metadata))
+    (directory / "SHA256SUMS").write_text(f"{image_hash}  {image_name}\n")
+    (directory / "roboter-os.svg").write_bytes((ROOT / "assets/roboter-os.svg").read_bytes())
+    (directory / "os-list.json").write_text(json.dumps({"os_list": []}))
+    return metadata
+
+
 def make_headless_test_package(directory: Path) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     metadata = make_variant_package(directory, "headless")
@@ -87,6 +120,39 @@ def test_headless_merge_rejects_desktop_variant(tmp_path):
     make_variant_package(desktop, "desktop")
     with pytest.raises(merge_test_packages.ReleasePackageError):
         merge_test_packages.merge_headless_package(desktop, tmp_path / "release")
+
+
+def test_headless_merge_accepts_production_status_without_test_suffix(tmp_path):
+    production_version = "2026.09.1"
+    headless = tmp_path / "headless"
+    make_variant_package(headless, "headless", version=production_version, status="production")
+    output = tmp_path / "release"
+    merge_test_packages.merge_headless_package(headless, output)
+    metadata = json.loads((output / "package.json").read_text())
+    assert metadata["status"] == "production"
+    assert metadata["version"] == production_version
+    assert metadata["tag"] == f"image-{production_version}"
+
+
+def test_headless_merge_rejects_production_status_with_test_suffix(tmp_path):
+    headless = tmp_path / "headless"
+    write_headless_package_files(headless, version=TEST_VERSION, status="production")
+    with pytest.raises(merge_test_packages.ReleasePackageError, match="Suffix"):
+        merge_test_packages.merge_headless_package(headless, tmp_path / "release")
+
+
+def test_headless_merge_rejects_test_status_without_test_suffix(tmp_path):
+    headless = tmp_path / "headless"
+    write_headless_package_files(headless, version="2026.09.1", status="test")
+    with pytest.raises(merge_test_packages.ReleasePackageError, match="Suffix"):
+        merge_test_packages.merge_headless_package(headless, tmp_path / "release")
+
+
+def test_headless_merge_rejects_unknown_status(tmp_path):
+    headless = tmp_path / "headless"
+    write_headless_package_files(headless, version="2026.09.1", status="local-test")
+    with pytest.raises(merge_test_packages.ReleasePackageError, match="akzeptiert nur Status"):
+        merge_test_packages.merge_headless_package(headless, tmp_path / "release")
 
 
 def test_publisher_source_is_headless_only_and_never_touches_production():

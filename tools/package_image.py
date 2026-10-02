@@ -41,6 +41,25 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def render_sha256sums(entries: dict[str, str]) -> str:
+    """Rendert einen `SHA256SUMS`-Dateiinhalt im Standardformat von
+    `sha256sum` (`<hash>  <dateiname>\\n`) für beliebig viele Dateien,
+    sortiert nach Dateiname für deterministische Ausgabe.
+
+    Aktuell schreiben `package_image()` und `merge_headless_package()`
+    jeweils nur eine Zeile (Headless-only-Übergangsregelung, AGENTS.md).
+    Diese Funktion ist bewusst generisch für mehrere Einträge gehalten,
+    damit ein künftiger vollständiger Produktions-Merge (Headless+Desktop)
+    dieselbe Funktion ohne Formatänderung wiederverwenden kann.
+    """
+    if not entries:
+        raise PackageError("SHA256SUMS benötigt mindestens einen Dateieintrag")
+    for name, digest in entries.items():
+        if not SHA256_PATTERN.fullmatch(digest):
+            raise PackageError(f"Ungültiger SHA-256-Hash für {name!r}")
+    return "".join(f"{digest}  {name}\n" for name, digest in sorted(entries.items()))
+
+
 def fetch_pinned(url: str, target: Path, expected: str) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_file() and sha256_file(target) == expected:
@@ -352,7 +371,21 @@ def render_manifest(metadata: dict, base_url: str) -> dict:
     return {"os_list": [entry]}
 
 
-def write_manifest(package_dir: Path, base_url: str) -> Path:
+def write_manifest(package_dir: Path, base_url: str, *, output_name: str = "os-list.json") -> Path:
+    """Rendert und validiert ein Imager-Manifest für das Paket in
+    `package_dir` gegen `base_url` und schreibt es unter `output_name` in
+    dasselbe Verzeichnis.
+
+    `output_name` ist bewusst parametrisiert statt hart auf `os-list.json`
+    verdrahtet: Der S3-Publish-Pfad nutzt weiterhin den Default
+    `os-list.json` (stabiles/-versioniertes S3-Manifest, AGENTS.md), ein
+    GitHub-Release-Adapter kann denselben Renderer für die
+    variantenpräfigierten GitHub-Assets (`headless-os-list.json`,
+    `desktop-os-list.json`) mit derselben Schemavalidierung, aber einer
+    eigenen, versionierten GitHub-Release-Asset-Basis-URL wiederverwenden
+    (AGENTS.md § „make package und Manifest-Rendering“, Punkt 4: Schema ist
+    identisch, nur Dateiname und Basis-URL unterscheiden sich je Ziel).
+    """
     metadata_path = package_dir / "package.json"
     metadata = json.loads(metadata_path.read_text())
     status = metadata.get("status")
@@ -391,7 +424,7 @@ def write_manifest(package_dir: Path, base_url: str) -> Path:
     if not icon_source.is_file():
         raise PackageError("Imager-Icon fehlt: assets/roboter-os.svg")
     shutil.copyfile(icon_source, package_dir / "roboter-os.svg")
-    output = package_dir / "os-list.json"
+    output = package_dir / output_name
     output.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     subprocess.run([sys.executable, "-m", "json.tool", str(output)], check=True, stdout=subprocess.DEVNULL)
     image_path = package_dir / metadata["image_file"]
@@ -403,6 +436,26 @@ def write_manifest(package_dir: Path, base_url: str) -> Path:
         if sums_path.read_text() != expected_sums:
             raise PackageError("SHA256SUMS stimmt nicht mit den Paketdaten überein")
     return output
+
+
+def github_manifest_name(variant: str) -> str:
+    """Kanonischer GitHub-Release-Asset-Dateiname je Variante
+    (`headless-os-list.json` / `desktop-os-list.json`, AGENTS.md § „Ein
+    vollständiges Produktionsrelease“)."""
+    if variant not in VARIANTS:
+        raise PackageError(f"Unbekannte Paketvariante: {variant}")
+    return f"{variant}-os-list.json"
+
+
+def write_github_manifest(package_dir: Path, release_asset_base_url: str) -> Path:
+    """Rendert das variantenspezifische GitHub-Release-Manifest
+    (`<variant>-os-list.json`) für das Paket in `package_dir` gegen die
+    versionierte GitHub-Release-Asset-Basis-URL. Nutzt denselben
+    Schema-validierten Renderer wie das S3-Manifest (write_manifest);
+    unterscheidet sich ausschließlich in Zieldateiname und Basis-URL."""
+    metadata = json.loads((package_dir / "package.json").read_text())
+    variant = metadata.get("variant")
+    return write_manifest(package_dir, release_asset_base_url, output_name=github_manifest_name(variant))
 
 
 def package_image(variant: str, deploy_dir: Path, output_dir: Path, base_url: str, release_build: bool) -> None:
@@ -467,7 +520,7 @@ def package_image(variant: str, deploy_dir: Path, output_dir: Path, base_url: st
     }
     (output_dir / "package.json").write_text(json.dumps(metadata, indent=2) + "\n")
     sums = output_dir / "SHA256SUMS"
-    sums.write_text(f"{metadata['image_download_sha256']}  {image_name}\n")
+    sums.write_text(render_sha256sums({image_name: metadata["image_download_sha256"]}))
     try:
         write_manifest(output_dir, base_url)
     except Exception:
