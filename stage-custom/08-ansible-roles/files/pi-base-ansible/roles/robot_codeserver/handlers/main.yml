@@ -1,0 +1,6 @@
+---
+- name: Restart code-server
+  become: true
+  ansible.builtin.systemd:
+    name: code-server@{{ ansible_facts['user_id'] }}
+    state: restarted

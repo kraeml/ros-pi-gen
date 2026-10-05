@@ -1,0 +1,59 @@
+---
+- name: PlatformIO – Rolle ist deaktiviert
+  ansible.builtin.debug:
+    msg: "robot_pio_enabled ist false – überspringe PlatformIO-Setup"
+  when: not robot_pio_enabled
+
+- name: PlatformIO einrichten
+  when: robot_pio_enabled
+  tags:
+    - platformio
+  block:
+  # --- Systemweite Abhängigkeiten (Root) ---
+  - name: Systemabhängigkeiten für PlatformIO installieren
+    ansible.builtin.apt:
+      name: "{{ robot_pio_packages }}"
+      state: present
+      update_cache: false
+  # --- Block für Benutzeraktionen (Installation im User-Home) ---
+  - name: User-Aufgaben für PlatformIO ausführen
+    become: true
+    become_method: su
+    become_user: "{{ robot_pio_user }}"
+    vars:
+      ansible_become_password: ""
+      ansible_become_flags: "-s /bin/bash"
+    block:
+    - name: Create virtual environment for PlatformIO
+      ansible.builtin.command: "python3 -m venv {{ robot_pio_venv_path }}"
+      args:
+        creates: "{{ robot_pio_venv_path }}"
+
+    - name: Install PlatformIO via pip in virtual environment
+      ansible.builtin.pip:
+        name: platformio
+        state: present
+        virtualenv: "{{ robot_pio_venv_path }}"
+
+    - name: Add PlatformIO to PATH
+      ansible.builtin.lineinfile:
+        path: "{{ robot_pio_user_dir }}/.bashrc"
+        line: "export PATH={{ robot_pio_venv_path }}/bin:$PATH"
+        state: present
+        create: true
+      # Hinweis: PATH-Änderung gilt erst nach erneutem Login oder `source ~/.bashrc`
+
+  # --- Block für Systemaktionen (Root: udev-Regeln & Symlinks) ---
+  - name: PlatformIO udev-Regeln für USB-Zugriff installieren
+    ansible.builtin.get_url:
+      url: "{{ robot_pio_udev_url }}"
+      dest: /etc/udev/rules.d/99-platformio-udev.rules
+      owner: root
+      group: root
+      mode: "0644"
+
+  - name: Add user to dialout
+    ansible.builtin.user:
+      name: "{{ robot_pio_user }}"
+      groups: dialout
+      append: true

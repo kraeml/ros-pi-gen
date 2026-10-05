@@ -1,0 +1,29 @@
+---
+# Steuert, ob Jupyter Lab installiert und als Systemdienst eingerichtet wird.
+# Standard: true (Rolle wird ausgeführt)
+robot_jupyter_enabled: true
+
+# Benutzerkonto, unter dem Jupyter Lab ausgeführt wird und dem die Dateien gehören.
+# Wird in pi-gen typischerweise via extra-vars mit FIRST_USER_NAME überschrieben.
+robot_jupyter_user: "pi"
+
+# Home-Verzeichnis des Benutzers – dient als Basis für venv und Notebook-Ablage
+robot_jupyter_user_dir: "/home/{{ robot_jupyter_user }}"
+
+# Pfad zur isolierten Python-Umgebung (venv) für Jupyter und seine Abhängigkeiten.
+# Trennt die Jupyter-Installation sauber von den systemweiten Debian-Python-Paketen.
+robot_jupyter_venv_path: "{{ robot_jupyter_user_dir }}/jupyter-env"
+
+# TCP-Port, auf dem der Jupyter-Webserver lauscht (Standard: 8888)
+robot_jupyter_port: 8888
+
+# Liste der Python-Pakete, die via pip in die venv installiert werden:
+# - jupyterlab: Die moderne Weboberfläche
+# - ipykernel: Der Python-Kernel zur Code-Ausführung
+# - notebook: Abwärtskompatibilität für klassische Notebooks
+# - ipywidgets: Unterstützung für interaktive Steuerelemente und Visualisierungen
+robot_jupyter_packages:
+  - jupyterlab
+  - ipykernel
+  - notebook
+  - ipywidgets

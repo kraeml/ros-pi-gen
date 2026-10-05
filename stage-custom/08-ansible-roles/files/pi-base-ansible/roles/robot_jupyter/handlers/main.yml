@@ -1,0 +1,11 @@
+---
+- name: Reload systemd
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart jupyter
+  become: true
+  ansible.builtin.systemd:
+    name: jupyter
+    state: restarted

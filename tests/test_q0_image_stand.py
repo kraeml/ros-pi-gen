@@ -50,6 +50,24 @@ def test_q0c_bau_log_enthaelt_accesspopup_stage(build_log_text):
     )
 
 
+def test_q0c_ansible_stage_playbook_erfolgreich(build_log_text):
+    top_level = list(re.finditer(r"Begin /pi-gen$", build_log_text, re.MULTILINE))
+    assert top_level, "Kein Top-Level-Build im Build-Log."
+    segment = build_log_text[top_level[-1].start():]
+    begin = "Begin /pi-gen/stage-custom/08-ansible-roles/01-run.sh"
+    end = "End /pi-gen/stage-custom/08-ansible-roles/01-run.sh"
+    assert begin in segment, "08-ansible-roles/01-run.sh wurde im letzten Build nicht gestartet."
+    assert end in segment, "08-ansible-roles/01-run.sh wurde im letzten Build nicht beendet."
+    stage_log = segment.split(begin, 1)[1].split(end, 1)[0]
+    recaps = re.findall(
+        r"localhost\s+:\s+ok=\d+\s+changed=\d+\s+unreachable=(\d+)\s+failed=(\d+)",
+        stage_log,
+    )
+    assert recaps, "Ansible-PLAY-RECAP fehlt innerhalb der 08-ansible-roles-Stage."
+    assert recaps[-1] == ("0", "0"), f"Ansible-Playbook meldet Fehler: {recaps[-1]}"
+    assert "FAILED!" not in stage_log and "UNREACHABLE!" not in stage_log
+
+
 def test_q0d_bau_log_vollstaendig(pack: ImagePack, build_log_path, build_log_text):
     # pi-gen hängt an work/<IMG_NAME>/build.log AN — das Log kann mehrere
     # Läufe enthalten. Dieser Test analysiert bewusst nur das LETZTE Segment
@@ -143,6 +161,8 @@ REQUIRED_SUBSTAGES = [
     "/pi-gen/stage-custom/05-docker-ansible/03-run.sh",
     "/pi-gen/stage-custom/07-accesspopup/00-packages",
     "/pi-gen/stage-custom/07-accesspopup/01-run.sh",
+    "/pi-gen/stage-custom/08-ansible-roles/00-packages",
+    "/pi-gen/stage-custom/08-ansible-roles/01-run.sh",
     "/pi-gen/export-image",
     "/pi-gen/export-image/05-finalise",
 ]

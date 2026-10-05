@@ -1,0 +1,20 @@
+---
+- name: Provision Robot Base System
+  hosts: all
+
+  roles:
+    #- role: rpi_robot_base
+    #  tags: [base, runtime]
+    - role: robot_jupyter
+      tags: [jupyter, dev]
+      when: robot_jupyter_enabled | default(true) | bool
+    - role: robot_codeserver
+      tags: [codeserver, dev]
+    - role: robot_platformio
+      tags: [platformio, dev]
+    #- role: robot_docker
+    #  tags: [docker]
+    #  when: robot_docker_enabled | default(false) | bool
+    #- role: rpi_robot_ros2
+    #  tags: [ros2, docker]
+    #  when: rpi_robot_ros2_enabled | default(false) | bool

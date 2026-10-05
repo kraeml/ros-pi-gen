@@ -1,0 +1,35 @@
+[Unit]
+Description=Jupyter Lab (Robot)
+# Erst starten, wenn die Netzwerkverbindung vollständig hergestellt ist
+After=network-online.target
+Wants=network-online.target
+# Rate-Limiting für Neustarts deaktivieren (gehört in modernen systemd-Versionen in [Unit])
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Dienst als Nicht-Root-Benutzer ausführen
+User={{ robot_jupyter_user }}
+WorkingDirectory={{ robot_jupyter_user_dir }}
+
+# Umgebungsvariablen: Python-Ausgaben direkt ins Journal schreiben und venv priorisieren
+Environment="PATH={{ robot_jupyter_venv_path }}/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Startbefehl:
+# - Auf allen Netzwerk-Schnittstellen (0.0.0.0) auf definiertem Port lauschen
+# - Kein lokaler Browserstart
+# - Ohne Token/Passwort und mit offenen CORS-Headern für einfaches lokales Arbeiten
+ExecStart={{ robot_jupyter_venv_path }}/bin/jupyter lab --ip=0.0.0.0 --port={{ robot_jupyter_port }} --no-browser --ServerApp.token='' --ServerApp.password='' --ServerApp.allow_origin='*' --ServerApp.disable_check_xsrf=True --ServerApp.root_dir={{ robot_jupyter_user_dir }}
+
+# Automatischer Neustart bei Absturz nach 5 Sekunden
+Restart=always
+RestartSec=5
+
+# Standardausgabe und Fehler direkt an das systemd-Journal weiterleiten
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+# Dienst im Standard-Mehrbenutzer-Modus beim Booten laden
+WantedBy=multi-user.target

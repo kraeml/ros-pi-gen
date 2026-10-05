@@ -55,6 +55,7 @@ ROOTFS_MANIFEST: list[tuple[str, str]] = [
     ("/usr/bin/ansible-playbook", "exists"),
 ]
 
+
 BOOT_MANIFEST: list[str] = [
     "kernel8.img",
     "bcm2710-rpi-3-b.dtb",
@@ -85,6 +86,76 @@ def test_image_rootfs_datei(pack, path, expectation):
             assert 'ipv4.addr "$ap_ip"' not in content
     else:
         pytest.fail(f"unbekannte Erwartung: {expectation!r}")
+
+
+def _ansible_home(pack) -> str:
+    homes = imageio.debugfs_ls(pack.root_img, "/home")
+    matches = [
+        f"/home/{name}/pi-base-ansible"
+        for name in homes
+        if imageio.debugfs_exists(pack.root_img, f"/home/{name}/pi-base-ansible/playbook.yml")
+    ]
+    assert len(matches) == 1, f"Erwartete genau ein pi-base-ansible-Home, gefunden: {matches}"
+    return matches[0]
+
+
+def test_image_ansible_roles_ausgerollt(pack):
+    base = _ansible_home(pack)
+    expected = [
+        "playbook.yml",
+        "roles/robot_jupyter/tasks/main.yml",
+        "roles/robot_jupyter/defaults/main.yml",
+        "roles/robot_jupyter/templates/jupyter.service.j2",
+        "roles/robot_codeserver/tasks/main.yml",
+        "roles/robot_codeserver/defaults/main.yml",
+        "roles/robot_platformio/tasks/main.yml",
+        "roles/robot_platformio/defaults/main.yml",
+    ]
+    missing = [f"{base}/{relative}" for relative in expected if not imageio.debugfs_exists(pack.root_img, f"{base}/{relative}")]
+    assert not missing, f"Ansible-Rollen-Dateien fehlen im Image: {missing}"
+
+
+def test_image_ansible_user_services_expected_config(pack):
+    base = _ansible_home(pack)
+    user_home = base.removesuffix("/pi-base-ansible")
+    username = user_home.removeprefix("/home/")
+    jupyter = imageio.debugfs_cat(pack.root_img, "/etc/systemd/system/jupyter.service")
+    assert f"User={username}" in jupyter
+    assert f"WorkingDirectory={user_home}" in jupyter
+    assert "--ip=0.0.0.0" in jupyter
+    assert "--ServerApp.token=''" in jupyter
+    assert "--ServerApp.password=''" in jupyter
+    assert "--ServerApp.disable_check_xsrf=True" in jupyter
+    assert "WantedBy=multi-user.target" in jupyter
+    assert imageio.debugfs_exists(
+        pack.root_img,
+        "/etc/systemd/system/multi-user.target.wants/jupyter.service",
+    ), "Jupyter-Systemdienst ist nicht aktiviert"
+    assert imageio.debugfs_exists(pack.root_img, f"{user_home}/jupyter-env/bin/jupyter")
+    assert imageio.debugfs_exists(pack.root_img, f"{user_home}/platformio-env/bin/pio")
+    assert imageio.debugfs_exists(
+        pack.root_img,
+        f"/etc/systemd/system/multi-user.target.wants/code-server@{username}.service",
+    ), "code-server-Systemdienst ist nicht aktiviert"
+    assert imageio.debugfs_exists(pack.root_img, "/etc/udev/rules.d/99-platformio-udev.rules")
+
+    config_path = f"{user_home}/.config/code-server/config.yaml"
+    config = imageio.debugfs_cat(pack.root_img, config_path)
+    assert "bind-addr: 0.0.0.0:8080" in config
+    assert "password: change_me" in config
+    stat = imageio.debugfs_stat(pack.root_img, config_path)
+    assert stat["type"] == "regular"
+    assert stat["mode"] == 0o644
+    passwd = imageio.debugfs_cat(pack.root_img, "/etc/passwd")
+    user_records = [line.split(":") for line in passwd.splitlines() if line.startswith(f"{username}:")]
+    assert len(user_records) == 1, f"Build-Benutzer {username} fehlt oder ist mehrfach vorhanden"
+    assert stat["uid"] == int(user_records[0][2]), "code-server-Konfiguration gehört nicht dem Build-Benutzer"
+
+    groups = imageio.debugfs_cat(pack.root_img, "/etc/group")
+    dialout = [line.split(":") for line in groups.splitlines() if line.startswith("dialout:")]
+    assert len(dialout) == 1 and username in dialout[0][3].split(","), (
+        f"Build-Benutzer {username} ist nicht Mitglied von dialout"
+    )
 
 
 @pytest.mark.parametrize("name", BOOT_MANIFEST, ids=lambda v: f"boot/{v}")

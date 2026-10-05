@@ -157,7 +157,7 @@ venv: $(VENV)/.deps.stamp
 lint: venv guard-pigen
 	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py $(REPO_ROOT)/tools/github_release.py
 	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
-	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py -q
+	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py -q
 
 # --- setup ------------------------------------------------------------------
 # Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs

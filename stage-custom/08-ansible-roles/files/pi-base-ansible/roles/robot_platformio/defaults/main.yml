@@ -1,0 +1,28 @@
+---
+# Steuert, ob Platformio installiert und als Systemdienst eingerichtet wird.
+# Standard: true (Rolle wird ausgeführt)
+robot_pio_enabled: true
+
+# Benutzerkonto, unter dem Platformio ausgeführt wird und dem die Dateien gehören.
+# Wird in pi-gen typischerweise via extra-vars mit FIRST_USER_NAME überschrieben.
+robot_pio_user: "pi"
+
+# Home-Verzeichnis des Benutzers – dient als Basis für venv
+robot_pio_user_dir: "/home/{{ robot_pio_user }}"
+
+# Pfad zur isolierten Python-Umgebung (venv) für Platformio und seine Abhängigkeiten.
+# Trennt die Platformio-Installation sauber von den systemweiten Debian-Python-Paketen.
+robot_pio_venv_path: "{{ robot_pio_user_dir }}/platformio-env"
+
+# URL für die offiziellen PlatformIO udev-Regeln
+robot_pio_udev_url: "https://raw.githubusercontent.com/platformio/platformio-core/develop/platformio/assets/system/99-platformio-udev.rules"
+
+# Systemabhängigkeiten für PlatformIO
+robot_pio_packages:
+  - python3
+  - python3-pip
+  - python3-venv
+  - virtualenv
+  - build-essential
+  - libudev-dev        # udev-Regeln für USB-Geräte (Programmer, Controller)
+  - libusb-1.0-0-dev   # USB-Kommunikation für Debugger/Flasher

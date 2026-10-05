@@ -1,0 +1,63 @@
+---
+# Statusmeldung ausgeben, falls die Rolle via Variable abgeschaltet wurde
+- name: Jupyter – Rolle ist deaktiviert
+  ansible.builtin.debug:
+    msg: "robot_jupyter_enabled ist false – überspringe Jupyter-Setup"
+  when: not robot_jupyter_enabled
+
+- name: Jupyter-Setup
+  when: robot_jupyter_enabled
+  block:
+    # Systempakete sicherstellen:
+    # python3-venv wird benötigt, um venvs zu erzeugen.
+    # python3-pip stellt das pip-Werkzeug für das Ansible-Modul bereit.
+    - name: Erforderliche Systempakete für Python-venv installieren
+      ansible.builtin.apt:
+        name:
+          - python3-venv
+          - python3-pip
+        state: present
+        update_cache: false
+
+    # --- Block für Benutzeraktionen (läuft via su als robot_jupyter_user) ---
+    - name: User-Aufgaben für Jupyter ausführen
+      become: true
+      become_method: su
+      become_user: "{{ robot_jupyter_user }}"
+      vars:
+        ansible_become_password: ""
+        ansible_become_flags: "-s /bin/bash"
+      block:
+      # Virtuelle Python-Umgebung im Home-Verzeichnis des Zielnutzers anlegen.
+      # --system-site-packages erlaubt den Zugriff auf vorinstallierte System-Libs (z. B. RPi.GPIO).
+      # become: true ist zwingend nötig, damit become_user greift.
+      - name: Jupyter-venv anlegen
+        ansible.builtin.command:
+          cmd: "python3 -m venv --system-site-packages {{ robot_jupyter_venv_path }}"
+          creates: "{{ robot_jupyter_venv_path }}"
+
+      # Pakete direkt in das User-venv installieren.
+      # Läuft als robot_jupyter_user, damit pip Schreibrechte auf die venv-Ordner hat.
+      - name: Jupyter-Pakete im venv installieren
+        ansible.builtin.pip:
+          name: "{{ robot_jupyter_packages }}"
+          virtualenv: "{{ robot_jupyter_venv_path }}"
+
+    # Systemaktionen (läuft als root)
+    # Systemd-Unit-Datei für den Autostart des Dienstes hinterlegen.
+    # Liegt im Systembereich (/etc/systemd/system/) und gehört root:root.
+    - name: Jupyter-Systemd-Unit deployen
+      ansible.builtin.template:
+        src: jupyter.service.j2
+        dest: /etc/systemd/system/jupyter.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    # Service im Systemd vormerken.
+    # Im pi-gen Build-Prozess (Chroot) ist nur enabled: true möglich (Autostart beim Booten).
+    # state: started würde im Chroot fehlschlagen, da PID 1 (systemd) noch nicht aktiv ist.
+    - name: Jupyter-Service für Autostart aktivieren
+      ansible.builtin.systemd:
+        name: jupyter
+        enabled: true

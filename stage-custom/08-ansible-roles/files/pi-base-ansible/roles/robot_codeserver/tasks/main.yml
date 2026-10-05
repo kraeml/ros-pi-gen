@@ -1,0 +1,88 @@
+---
+- name: Prüfe ob code-server bereits installiert ist
+  ansible.builtin.stat:
+    path: "/usr/lib/code-server/bin/code-server"
+  register: robot_codeserver_binary
+
+- name: Lade code-server .deb Paket herunter
+  ansible.builtin.get_url:
+    url: "{{ robot_codeserver_deb_url }}"
+    dest: "{{ robot_codeserver_deb_dest }}"
+    mode: "0644"
+  when: not robot_codeserver_binary.stat.exists
+
+- name: Installiere code-server .deb Paket
+  ansible.builtin.apt:
+    deb: "{{ robot_codeserver_deb_dest }}"
+    state: present
+  when: not robot_codeserver_binary.stat.exists
+
+- name: Aktiviere code-server Systemd-Dienst für Zielbenutzer
+  ansible.builtin.systemd:
+    name: "code-server@{{ robot_codeserver_user }}"
+    enabled: true
+    # state: started entfällt im Chroot-Build, da systemd nicht als PID 1 läuft
+
+- name: Erstelle Konfigurationsverzeichnis für Zielbenutzer
+  ansible.builtin.file:
+    path: "{{ robot_codeserver_user_dir }}/.config/code-server"
+    state: directory
+    owner: "{{ robot_codeserver_user }}"
+    group: "{{ robot_codeserver_user }}"
+    mode: "0755"
+
+- name: Konfiguriere bind-address auf 0.0.0.0
+  ansible.builtin.lineinfile:
+    path: "{{ robot_codeserver_user_dir }}/.config/code-server/config.yaml"
+    regexp: "^bind-addr:.*"
+    line: "bind-addr: 0.0.0.0:{{ robot_codeserver_port }}"
+    owner: "{{ robot_codeserver_user }}"
+    group: "{{ robot_codeserver_user }}"
+    mode: "0644"
+    create: true
+
+- name: Konfiguriere Passwort
+  ansible.builtin.lineinfile:
+    path: "{{ robot_codeserver_user_dir }}/.config/code-server/config.yaml"
+    regexp: "^password:.*"
+    line: "password: {{ robot_codeserver_password }}"
+    owner: "{{ robot_codeserver_user }}"
+    group: "{{ robot_codeserver_user }}"
+    mode: "0644"
+    create: true
+
+- name: Erstelle code-server User-Verzeichnis
+  ansible.builtin.file:
+    path: "{{ robot_codeserver_user_dir }}/.local/share/code-server/User"
+    state: directory
+    owner: "{{ robot_codeserver_user }}"
+    group: "{{ robot_codeserver_user }}"
+    mode: "0755"
+    recurse: true
+
+- name: Setze deutsche Lokalisierung
+  ansible.builtin.copy:
+    content: |
+      {
+          "locale": "de"
+      }
+    dest: "{{ robot_codeserver_user_dir }}/.local/share/code-server/User/argv.json"
+    owner: "{{ robot_codeserver_user }}"
+    group: "{{ robot_codeserver_user }}"
+    mode: "0644"
+
+- name: Prüfe ob deutsches Sprachpaket bereits existiert
+  ansible.builtin.find:
+    paths: "{{ robot_codeserver_user_dir }}/.local/share/code-server/extensions"
+    patterns: "ms-ceintl.vscode-language-pack-de*"
+    file_type: directory
+  register: robot_codeserver_langpack
+
+- name: Installiere deutsches Sprachpaket als Zielbenutzer
+  ansible.builtin.command: >
+    code-server --install-extension MS-CEINTL.vscode-language-pack-de
+    --user-data-dir {{ robot_codeserver_user_dir }}/.local/share/code-server/
+    --extensions-dir {{ robot_codeserver_user_dir }}/.local/share/code-server/extensions
+  become_user: "{{ robot_codeserver_user }}"
+  when: robot_codeserver_langpack.matched == 0
+  changed_when: true

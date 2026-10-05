@@ -1,0 +1,28 @@
+---
+# WICHTIG: Passwort MUSS in Produktion oder bei öffentlichem Zugriff geändert werden!
+robot_codeserver_password: "change_me"
+robot_codeserver_port: 8080
+
+
+# Zielbenutzer für den Dienst (Standard: pi)
+robot_codeserver_user: "pi"
+robot_codeserver_user_dir: "/home/{{ robot_codeserver_user }}"
+
+# Architektur-Mapping: Ansible → Debian-Paketarchitektur
+_robot_codeserver_arch_map:
+  aarch64: arm64
+  x86_64: amd64
+
+robot_codeserver_arch: >-
+  {{ _robot_codeserver_arch_map[ansible_facts['architecture']]
+     | default('amd64') }}
+
+robot_codeserver_version: "4.118.0"
+robot_codeserver_deb_base: >-
+  https://github.com/coder/code-server/releases/download
+robot_codeserver_deb_file: >-
+  code-server_{{ robot_codeserver_version }}_{{ robot_codeserver_arch }}.deb
+robot_codeserver_deb_url: >-
+  {{ robot_codeserver_deb_base }}/v{{ robot_codeserver_version }}/{{ robot_codeserver_deb_file }}
+robot_codeserver_deb_dest: >-
+  /tmp/{{ robot_codeserver_deb_file }}
