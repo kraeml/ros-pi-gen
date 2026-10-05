@@ -67,6 +67,10 @@ S3_ENDPOINT ?=
 S3_REGION ?=
 S3_PUBLIC_BASE_URL ?=
 DRY_RUN ?= 0
+REMOTE ?= origin
+PREFLIGHT_MODE ?= local
+EXPECTED_COMMIT ?=
+GITHUB_ONLY ?= 0
 SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schnelle Iteration")
 
 # --- VM-Build (robotics-lab-vm-Submodul, Details: README „Build in der VM") --
@@ -104,7 +108,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(REPO_ROOT)/tools/build-docker.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests clean-release-stage ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests release-preflight release-version release clean-release-stage ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -128,6 +132,9 @@ help:
 	@echo "  make publish-s3-production    Headless-only-Produktionspaket nach ros-pi-gen/ auf Hetzner (nur nach ROS_PI_GEN_PRODUCTION_WRITE_APPROVED=yes)"
 	@echo "  make publish-s3-production-image      Nur Image+Icon veröffentlichen (Release-Workflow-Schritt vor GitHub-Draft)"
 	@echo "  make publish-s3-production-manifests  Nur S3-Manifeste veröffentlichen (Release-Workflow-Schritt nach GitHub-Draft)"
+	@echo "  make release-version         Nächste freie lokale/Remote-CalVer-Version vorschlagen (UTC)"
+	@echo "  make release [TAG=image-YYYY.MM.PATCH]  Preflight, Gate-4-Bestätigung, annotierter Tag und Einzel-Tag-Push"
+	@echo "  make release-preflight TAG=image-YYYY.MM.PATCH  Read-only Freigabe-/Wiederverwendungsprüfung"
 	@echo "  make ci                       venv lint setup build test"
 	@echo "  make clean-container          verwaisten Build-Container pigen_work entfernen"
 	@echo "  make clean-work               partielles/persistentes work/ entfernen (Bootstrap frisch)"
@@ -155,9 +162,9 @@ venv: $(VENV)/.deps.stamp
 
 # --- lint -------------------------------------------------------------------
 lint: venv guard-pigen
-	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py $(REPO_ROOT)/tools/github_release.py
+	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py $(REPO_ROOT)/tools/github_release.py $(REPO_ROOT)/tools/release_preflight.py $(REPO_ROOT)/tools/release.py
 	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
-	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py -q
+	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py tests/test_release_preflight.py tests/test_release.py -q
 
 # --- setup ------------------------------------------------------------------
 # Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs
@@ -290,6 +297,33 @@ publish-s3-production-image: venv
 publish-s3-production-manifests: venv
 	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
 	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner --production-step manifests $(if $(filter 1,$(DRY_RUN)),--dry-run,)
+
+release-version:
+	@python3 $(REPO_ROOT)/tools/release_preflight.py --suggest-version --remote "$(REMOTE)"
+
+release: export RELEASE_TAG = $(TAG)
+release: export RELEASE_REMOTE = $(REMOTE)
+release: venv
+	@$(VENV)/bin/python $(REPO_ROOT)/tools/release.py
+
+release-preflight: export RELEASE_PREFLIGHT_TAG = $(TAG)
+release-preflight: export RELEASE_PREFLIGHT_MODE = $(PREFLIGHT_MODE)
+release-preflight: export RELEASE_PREFLIGHT_REMOTE = $(REMOTE)
+release-preflight: export RELEASE_PREFLIGHT_COMMIT = $(EXPECTED_COMMIT)
+release-preflight: export RELEASE_PREFLIGHT_GITHUB_ONLY = $(GITHUB_ONLY)
+release-preflight: venv
+	@tag="$$RELEASE_PREFLIGHT_TAG"; \
+	  candidate=0; \
+	  if [ -z "$$tag" ]; then \
+	    tag="$$($(VENV)/bin/python $(REPO_ROOT)/tools/release_preflight.py --suggest-version --remote "$$RELEASE_PREFLIGHT_REMOTE")" || exit $$?; \
+	    echo "Vorgeschlagene Release-Version: $$tag"; \
+	    candidate=1; \
+	  fi; \
+	  args=(--tag "$$tag" --mode "$$RELEASE_PREFLIGHT_MODE" --remote "$$RELEASE_PREFLIGHT_REMOTE"); \
+	  if [ "$$candidate" = "1" ]; then args+=(--candidate); fi; \
+	  if [ -n "$$RELEASE_PREFLIGHT_COMMIT" ]; then args+=(--expected-commit "$$RELEASE_PREFLIGHT_COMMIT"); fi; \
+	  if [ "$$RELEASE_PREFLIGHT_GITHUB_ONLY" = "1" ]; then args+=(--github-only); fi; \
+	  $(VENV)/bin/python $(REPO_ROOT)/tools/release_preflight.py "$${args[@]}"
 
 # --- ci (Pipeline-Kette; Stufen wie GitHub-Image-Workflow.md, § 3) ----------
 ci: venv lint setup build test

@@ -54,26 +54,41 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_COMMIT: ${{ github.sha }}
     steps:
-      - name: Produktions-Tag-Format erzwingen (kein -test-Suffix)
-        run: |
-          TAG="${{ github.ref_name }}"
-          if [[ ! "$TAG" =~ ^image-[0-9]{4}\.[0-9]{2}\.[0-9]+$ ]]; then
-            echo "Tag '$TAG' ist kein gültiges Produktions-Tag (image-YYYY.MM.PATCH, kein -test-Suffix)." >&2
-            echo "Test-/Gate-2/3-Veröffentlichungen laufen ausschließlich lokal über tools/publish-s3.sh (AGENTS.md)." >&2
-            exit 1
-          fi
-
       - uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Python-Umgebung für Preflight
+        run: make venv
+
+      - name: AWS-CLI-Profil hetzner-prod für Read-only-Preflight konfigurieren
+        env:
+          HETZNER_ACCESS_KEY_ID: ${{ secrets.HETZNER_ACCESS_KEY_ID }}
+          HETZNER_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_SECRET_ACCESS_KEY }}
+        run: |
+          aws configure set aws_access_key_id "$HETZNER_ACCESS_KEY_ID" --profile hetzner-prod
+          aws configure set aws_secret_access_key "$HETZNER_SECRET_ACCESS_KEY" --profile hetzner-prod
+          aws configure set region hel1 --profile hetzner-prod
+
+      - name: Produktions-Preflight vor Build und Upload
+        run: make release-preflight TAG="$RELEASE_TAG" PREFLIGHT_MODE=ci EXPECTED_COMMIT="$RELEASE_COMMIT"
+
+      - name: Lint
+        run: make lint
 
       # Siehe .github/workflows/ci.yml für denselben Schritt — Runner-Disk
       # ist knapp, dieselben sicheren Räum-Kandidaten vorab entfernen.
@@ -133,6 +148,9 @@ jobs:
           aws configure set aws_access_key_id "$HETZNER_ACCESS_KEY_ID" --profile hetzner-prod
           aws configure set aws_secret_access_key "$HETZNER_SECRET_ACCESS_KEY" --profile hetzner-prod
           aws configure set region hel1 --profile hetzner-prod
+
+      - name: GitHub-Wiederverwendung unmittelbar vor S3-Schreibzugriff ausschließen
+        run: make release-preflight TAG="$RELEASE_TAG" PREFLIGHT_MODE=ci GITHUB_ONLY=1
 
       # Schritt 1/5 (siehe Kopfkommentar): Image + Icon zuerst.
       - name: "S3 (1/2): Produktions-Image + Icon veröffentlichen"
