@@ -87,9 +87,6 @@ jobs:
       - name: Produktions-Preflight vor Build und Upload
         run: make release-preflight TAG="$RELEASE_TAG" PREFLIGHT_MODE=ci EXPECTED_COMMIT="$RELEASE_COMMIT"
 
-      - name: Lint
-        run: make lint
-
       # Siehe .github/workflows/ci.yml für denselben Schritt — Runner-Disk
       # ist knapp, dieselben sicheren Räum-Kandidaten vorab entfernen.
       - name: Disk-Cleanup
@@ -100,6 +97,9 @@ jobs:
           df -h /
 
       - uses: docker/setup-qemu-action@v4
+
+      - name: Lint
+        run: make lint
 
       - run: make venv
 
