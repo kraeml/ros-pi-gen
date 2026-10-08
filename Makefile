@@ -216,20 +216,18 @@ clean-variant-skips:
 # Cleanup (Ctrl+C inklusive) um build-docker.sh.
 # SKIP_IMAGES_BUILD=1: rm-first (self-healing bei fehlgeschlagenem SKIP-Lauf)
 # + touch für diesen Lauf — der nächste Normal-Build exportiert wieder.
-build: guard-pigen guard-variant guard-container
+build: guard-pigen guard-variant guard-container lint
 ifeq ($(ENGINE),docker)
 	@mkdir -p $(WORK_DIR) $(DEPLOY_DIR)
 	@if [ "$(RELEASE_BUILD)" = "1" ]; then touch $(STAGE_DIR)/04-user-data/SKIP; else rm -f $(STAGE_DIR)/04-user-data/SKIP; fi
 	@rm -f $(STAGE_DIR)/SKIP_IMAGES
 	@if [ -n "$(SKIP_IMAGES_BUILD)" ]; then touch $(STAGE_DIR)/SKIP_IMAGES; fi
 	@CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
-	  APT_PROXY='$(APT_PROXY)' \
 	  PIGEN_DOCKER_OPTS='$(PIGEN_DOCKER_OPTS)' \
 	  tools/build-docker.sh
 else ifeq ($(ENGINE),native)
 	@if [ "$(RELEASE_BUILD)" = "1" ]; then touch $(STAGE_DIR)/04-user-data/SKIP; else rm -f $(STAGE_DIR)/04-user-data/SKIP; fi
 	cd $(PIGEN_DIR) && sudo env \
-	  APT_PROXY='$(APT_PROXY)' \
 	  STAGE_LIST="$(PIGEN_DIR)/stage0 $(PIGEN_DIR)/stage1 $(PIGEN_DIR)/stage2 $(STAGE_DIR)" \
 	  WORK_DIR=$(WORK_DIR)/'$(shell source $(REPO_ROOT)/config && echo $${IMG_NAME})' \
 	  DEPLOY_DIR=$(DEPLOY_DIR) \

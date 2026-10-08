@@ -1,6 +1,6 @@
 ---
 # Statusmeldung ausgeben, falls die Rolle via Variable abgeschaltet wurde
-- name: Jupyter – Rolle ist deaktiviert
+- name: Jupyter – Rolle
   ansible.builtin.debug:
     msg: "robot_jupyter_enabled ist false – überspringe Jupyter-Setup"
   when: not robot_jupyter_enabled
