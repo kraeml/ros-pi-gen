@@ -163,7 +163,7 @@ venv: $(VENV)/.deps.stamp
 # --- lint -------------------------------------------------------------------
 lint: venv guard-pigen
 	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py $(REPO_ROOT)/tools/github_release.py $(REPO_ROOT)/tools/release_preflight.py $(REPO_ROOT)/tools/release.py
-	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
+	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/stage-custom/10-doitpi-firstboot/files/doitpi_firstboot.sh $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
 	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py tests/test_release_preflight.py tests/test_release.py -q
 
 # --- setup ------------------------------------------------------------------

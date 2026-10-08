@@ -1,13 +1,13 @@
 [Unit]
 Description=Einmaliges Skript für den ersten Start von DoitPi
-Wants=network-online.target
-After=network-online.target
+Wants=cloud-init-network.service
+After=cloud-init-network.service
 ConditionPathExists=/usr/local/sbin/doitpi_firstboot.sh
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/doitpi_firstboot.sh
-TimeoutStartSec=1200
+TimeoutStartSec=120
 
 [Install]
 WantedBy=multi-user.target

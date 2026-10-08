@@ -2,9 +2,8 @@
 # doitpi_firstboot.sh – Einmaliges Skript für den ersten Start von DoitPi
 #
 # Aufgaben:
-#   - Ansible und Python-Interpreter testen (immer, auch offline)
+#   - Ansible und Python-Interpreter prüfen (Warnung bei Fehler, kein Abbruch)
 #   - Alte Benutzer- und Pfadangaben (/home/pi, User=pi) in systemd-Units ersetzen
-#   - APT-Paketlisten per Ansible aktualisieren, falls Internet vorhanden ist
 #   - Ersten Start als erledigt markieren und bei Änderungen sauber neu starten
 
 # Bei Fehlern, nicht gesetzten Variablen und fehlschlagenden Pipes abbrechen
@@ -13,6 +12,21 @@ set -euo pipefail
 # Hilfsfunktion: Meldung mit Zeitstempel auf stderr ausgeben
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" >&2
+}
+
+# Erfolg der Cloud-init-Netzwerkstufe im aktuellen Boot prüfen.
+cloudinit_init_ok() {
+    python3 - <<'PY'
+import json, sys
+try:
+    with open("/run/cloud-init/status.json") as f:
+        stage = json.load(f)["v1"]["init"]
+except (OSError, KeyError, TypeError, ValueError):
+    sys.exit(2)
+if not isinstance(stage, dict) or not isinstance(stage.get("errors"), list):
+    sys.exit(2)
+sys.exit(0 if stage.get("end") and not stage["errors"] else 1)
+PY
 }
 
 # Hilfsfunktion: Text in allen Dateien eines Verzeichnisses ersetzen.
@@ -37,11 +51,24 @@ fi
 
 # Markerdatei: Existiert sie, wurde der erste Start bereits abgeschlossen
 MARKER=/var/lib/doitpi/firstboot.done
-mkdir -p "$(dirname "${MARKER}")"
 if [[ -e "${MARKER}" ]]; then
     log "Erster Start bereits erledigt, beende."
     exit 0
 fi
+
+# Erfolg der Cloud-init-Netzwerkstufe vor der Benutzerermittlung sicherstellen.
+CLOUDINIT_STATUS=0
+cloudinit_init_ok || CLOUDINIT_STATUS=$?
+if (( CLOUDINIT_STATUS != 0 )); then
+    case "${CLOUDINIT_STATUS}" in
+        1) log "Cloud-init-Netzwerkstufe mit Fehlern oder nicht beendet, Marker wird nicht gesetzt." ;;
+        2) log "Cloud-init-Status fehlt oder ist ungültig (/run/cloud-init/status.json), Marker wird nicht gesetzt." ;;
+        *) log "Cloud-init-Prüfung konnte nicht ausgeführt werden (Exit-Code ${CLOUDINIT_STATUS}), Marker wird nicht gesetzt." ;;
+    esac
+    exit 1
+fi
+
+mkdir -p "$(dirname "${MARKER}")"
 
 # Passwd-Eintrag des Standardbenutzers (UID 1000) holen, sonst abbrechen
 USER_ENTRY=$(getent passwd 1000 || true)
@@ -61,8 +88,7 @@ if ! ansible \
         --inventory localhost, --connection local \
         --module-name ping \
         localhost; then
-    log "Fehler: Ansible-Test (ping) fehlgeschlagen. Installation und Python-Interpreter prüfen."
-    exit 1
+    log "Warnung: Ansible-Test (ping) fehlgeschlagen. Installation und Python-Interpreter prüfen."
 fi
 
 # Alte Pfade und Benutzernamen in den systemd-Units ersetzen.
@@ -82,29 +108,6 @@ NEEDS_REBOOT=false
 if [[ -n "${CHANGED_FILES}" ]]; then
     log "Units geändert, Neustart wird nötig."
     NEEDS_REBOOT=true
-fi
-
-# Internetverbindung prüfen (3 Versuche, je 2 Sekunden Timeout)
-if ping -c 3 -W 2 9.9.9.9 &>/dev/null \
-   || curl --connect-timeout 2 -sI https://1.1.1.1 &>/dev/null; then
-    log "Internet verfügbar, aktualisiere Paketlisten mit Ansible."
-
-    # Ansible-Test 2 (nur mit Internet): Das Modul "apt" aktualisiert die
-    # Paketlisten und prüft nebenbei, ob das apt-Modul funktioniert.
-    #   --connection local      : kein SSH, direkt auf diesem Rechner
-    #   --inventory localhost,  : Inventar aus einem einzelnen Host (Komma beachten!)
-    #   cache_valid_time=3600   : Update überspringen, wenn der Cache jünger als 1 h ist
-    if ! ansible \
-            --extra-vars ansible_python_interpreter=/usr/bin/python3 \
-            --inventory localhost, --connection local \
-            --module-name apt \
-            --args "update_cache=yes cache_valid_time=3600" \
-            localhost; then
-        log "Fehler: Ansible-Test (apt) fehlgeschlagen."
-        exit 1
-    fi
-else
-    log "Warnung: Keine Internetverbindung, apt-Test und Paketlisten-Update übersprungen."
 fi
 
 # Build-Hilfsdatei entfernen: Sie erzwingt bei Paket-Updates immer die neue
