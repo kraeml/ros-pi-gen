@@ -48,6 +48,7 @@ ENGINE   ?= docker
 # expliziter, lokaler Opt-in per RELEASE_BUILD=0 — niemals der Default
 # auf GitHub.
 RELEASE_BUILD ?= 1
+# Download-Basis der Imager-Pakete muss für jedes Paket explizit gesetzt werden.
 BASE_URL ?=
 PACKAGE_DIR ?= $(REPO_ROOT)/package/$(VARIANT)
 HEADLESS_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-test
@@ -71,7 +72,8 @@ REMOTE ?= origin
 PREFLIGHT_MODE ?= local
 EXPECTED_COMMIT ?=
 GITHUB_ONLY ?= 0
-SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schnelle Iteration")
+# Iteration: Export überspringen (siehe README, „schnelle Iteration")
+SKIP_IMAGES_BUILD ?=
 
 # --- VM-Build (robotics-lab-vm-Submodul, Details: README „Build in der VM") --
 # Ubuntu 24.04 in VirtualBox: qemu-user-static 8.x emuliert OFD korrekt —
@@ -79,12 +81,15 @@ SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schne
 # Kernel-Eingriff). Das Repo landet per vm-sync auf der VM-Disk (nicht im
 # geteilten Ordner — vboxsf ist für Builds deutlich zu langsam).
 VAGRANT_DIR := $(REPO_ROOT)/vm/robotics-lab-vm
-VM_DISK     ?= 80GB           # einmalig beim ersten vm-up; später ändern = vm-destroy
+# einmalig beim ersten vm-up; später ändern = vm-destroy
+VM_DISK     ?= 80GB
 VM_USER     ?= vagrant
-VM_IP      ?= 192.168.33.11  # Host-Only-IP der VM (Submodul-ENV VM_IP, Default .10) — .10 durch die laufende pi-gen-Dev-VM belegt
+# Host-Only-IP der VM (Submodul-ENV VM_IP, Default .10) — .10 durch die laufende pi-gen-Dev-VM belegt
+VM_IP      ?= 192.168.33.11
 VM_SSH_OPTS := -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 VM_DEST     := build/ros-pi-gen
-VM_NAME     ?= ros-pi-gen     # VirtualBox-Name; Default im Submodul-Vagrantfile: robotics
+# VirtualBox-Name; Default im Submodul-Vagrantfile: robotics
+VM_NAME     ?= ros-pi-gen
 
 # pi-gen-Submodul-Pin (arm64-Branch). Regelmäßig auf Aktualität prüfen:
 #   git -C pi-gen fetch origin arm64 && git -C pi-gen log origin/arm64 -1
@@ -105,7 +110,8 @@ PIGEN_DOCKER_OPTS := --volume $(STAGE_DIR):/pi-gen/stage-custom:ro \
 SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) \
                $(STAGE_DIR)/prerun.sh \
                $(REPO_ROOT)/tools/binfmt.sh \
-               $(REPO_ROOT)/tools/build-docker.sh
+               $(REPO_ROOT)/tools/build-docker.sh \
+               $(STAGE_DIR)/10-doitpi-firstboot/files/doitpi_firstboot.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests release-preflight release-version release clean-release-stage ci clean-container clean-work clean-variant-skips
@@ -163,7 +169,7 @@ venv: $(VENV)/.deps.stamp
 # --- lint -------------------------------------------------------------------
 lint: venv guard-pigen
 	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py $(REPO_ROOT)/tools/github_release.py $(REPO_ROOT)/tools/release_preflight.py $(REPO_ROOT)/tools/release.py
-	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/stage-custom/10-doitpi-firstboot/files/doitpi_firstboot.sh $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
+	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
 	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py tests/test_release_preflight.py tests/test_release.py -q
 
 # --- setup ------------------------------------------------------------------

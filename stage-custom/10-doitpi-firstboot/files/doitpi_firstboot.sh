@@ -14,7 +14,24 @@ log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" >&2
 }
 
-# Erfolg der Cloud-init-Netzwerkstufe im aktuellen Boot prüfen.
+# Prüft, ob die Cloud-init-Stufe "init" im aktuellen Boot erfolgreich war.
+#
+# Warum diese Stufe: Sie enthält das Anlegen bzw. Umbenennen des Benutzers
+# (users_groups). Erst danach ist UID 1000 verlässlich der Zielbenutzer.
+#
+# Warum Python statt Bash: status.json ist JSON; mit grep/sed ließe sich der
+# Block der richtigen Stufe nicht robust herausfiltern ("end" und "errors"
+# kommen in jeder Stufe vor). Cloud-init ist selbst in Python geschrieben,
+# python3 ist hier also immer vorhanden.
+#
+# Warum nicht "cloud-init status": Der Befehl fasst alle Stufen zusammen und
+# meldet zu diesem Zeitpunkt noch "running". Mit --wait würde der Dienst auf
+# cloud-final warten und einen Ordering-Zyklus erzeugen.
+#
+# Rückgabewerte:
+#   0  Stufe beendet und ohne Fehler
+#   1  Stufe nicht beendet oder mit Fehlern
+#   2  Statusdatei fehlt, ist kein gültiges JSON oder hat unerwartete Struktur
 cloudinit_init_ok() {
     python3 - <<'PY'
 import json, sys
