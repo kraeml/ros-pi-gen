@@ -89,7 +89,7 @@ VM_NAME     ?= ros-pi-gen     # VirtualBox-Name; Default im Submodul-Vagrantfile
 # pi-gen-Submodul-Pin (arm64-Branch). Regelmäßig auf Aktualität prüfen:
 #   git -C pi-gen fetch origin arm64 && git -C pi-gen log origin/arm64 -1
 # Updates nur per bewusster Pin-Änderung (nie automatisch — siehe README).
-PIGEN_COMMIT    := 74d08a3
+PIGEN_COMMIT    := d346cd5
 VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 
 # build-docker.sh: Deploy landet via `docker cp` im cwd des Aufrufs —
