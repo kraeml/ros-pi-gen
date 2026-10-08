@@ -48,6 +48,7 @@ ENGINE   ?= docker
 # expliziter, lokaler Opt-in per RELEASE_BUILD=0 — niemals der Default
 # auf GitHub.
 RELEASE_BUILD ?= 1
+# Download-Basis der Imager-Pakete muss für jedes Paket explizit gesetzt werden.
 BASE_URL ?=
 PACKAGE_DIR ?= $(REPO_ROOT)/package/$(VARIANT)
 HEADLESS_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-test
@@ -71,7 +72,8 @@ REMOTE ?= origin
 PREFLIGHT_MODE ?= local
 EXPECTED_COMMIT ?=
 GITHUB_ONLY ?= 0
-SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schnelle Iteration")
+# Iteration: Export überspringen (siehe README, „schnelle Iteration")
+SKIP_IMAGES_BUILD ?=
 
 # --- VM-Build (robotics-lab-vm-Submodul, Details: README „Build in der VM") --
 # Ubuntu 24.04 in VirtualBox: qemu-user-static 8.x emuliert OFD korrekt —
@@ -79,17 +81,20 @@ SKIP_IMAGES_BUILD ?=   # Iteration: Export überspringen (siehe README, „schne
 # Kernel-Eingriff). Das Repo landet per vm-sync auf der VM-Disk (nicht im
 # geteilten Ordner — vboxsf ist für Builds deutlich zu langsam).
 VAGRANT_DIR := $(REPO_ROOT)/vm/robotics-lab-vm
-VM_DISK     ?= 80GB           # einmalig beim ersten vm-up; später ändern = vm-destroy
+# einmalig beim ersten vm-up; später ändern = vm-destroy
+VM_DISK     ?= 80GB
 VM_USER     ?= vagrant
-VM_IP      ?= 192.168.33.11  # Host-Only-IP der VM (Submodul-ENV VM_IP, Default .10) — .10 durch die laufende pi-gen-Dev-VM belegt
+# Host-Only-IP der VM (Submodul-ENV VM_IP, Default .10) — .10 durch die laufende pi-gen-Dev-VM belegt
+VM_IP      ?= 192.168.33.11
 VM_SSH_OPTS := -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 VM_DEST     := build/ros-pi-gen
-VM_NAME     ?= ros-pi-gen     # VirtualBox-Name; Default im Submodul-Vagrantfile: robotics
+# VirtualBox-Name; Default im Submodul-Vagrantfile: robotics
+VM_NAME     ?= ros-pi-gen
 
 # pi-gen-Submodul-Pin (arm64-Branch). Regelmäßig auf Aktualität prüfen:
 #   git -C pi-gen fetch origin arm64 && git -C pi-gen log origin/arm64 -1
 # Updates nur per bewusster Pin-Änderung (nie automatisch — siehe README).
-PIGEN_COMMIT    := 74d08a3
+PIGEN_COMMIT    := d346cd5
 VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 
 # build-docker.sh: Deploy landet via `docker cp` im cwd des Aufrufs —
@@ -105,7 +110,8 @@ PIGEN_DOCKER_OPTS := --volume $(STAGE_DIR):/pi-gen/stage-custom:ro \
 SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) \
                $(STAGE_DIR)/prerun.sh \
                $(REPO_ROOT)/tools/binfmt.sh \
-               $(REPO_ROOT)/tools/build-docker.sh
+               $(REPO_ROOT)/tools/build-docker.sh \
+               $(STAGE_DIR)/10-doitpi-firstboot/files/doitpi_firstboot.sh
 
 .DEFAULT_GOAL := help
 .PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests release-preflight release-version release clean-release-stage ci clean-container clean-work clean-variant-skips
@@ -216,20 +222,18 @@ clean-variant-skips:
 # Cleanup (Ctrl+C inklusive) um build-docker.sh.
 # SKIP_IMAGES_BUILD=1: rm-first (self-healing bei fehlgeschlagenem SKIP-Lauf)
 # + touch für diesen Lauf — der nächste Normal-Build exportiert wieder.
-build: guard-pigen guard-variant guard-container
+build: guard-pigen guard-variant guard-container lint
 ifeq ($(ENGINE),docker)
 	@mkdir -p $(WORK_DIR) $(DEPLOY_DIR)
 	@if [ "$(RELEASE_BUILD)" = "1" ]; then touch $(STAGE_DIR)/04-user-data/SKIP; else rm -f $(STAGE_DIR)/04-user-data/SKIP; fi
 	@rm -f $(STAGE_DIR)/SKIP_IMAGES
 	@if [ -n "$(SKIP_IMAGES_BUILD)" ]; then touch $(STAGE_DIR)/SKIP_IMAGES; fi
 	@CONTINUE=$(CONTINUE) PRESERVE_CONTAINER=$(PRESERVE_CONTAINER) \
-	  APT_PROXY='$(APT_PROXY)' \
 	  PIGEN_DOCKER_OPTS='$(PIGEN_DOCKER_OPTS)' \
 	  tools/build-docker.sh
 else ifeq ($(ENGINE),native)
 	@if [ "$(RELEASE_BUILD)" = "1" ]; then touch $(STAGE_DIR)/04-user-data/SKIP; else rm -f $(STAGE_DIR)/04-user-data/SKIP; fi
 	cd $(PIGEN_DIR) && sudo env \
-	  APT_PROXY='$(APT_PROXY)' \
 	  STAGE_LIST="$(PIGEN_DIR)/stage0 $(PIGEN_DIR)/stage1 $(PIGEN_DIR)/stage2 $(STAGE_DIR)" \
 	  WORK_DIR=$(WORK_DIR)/'$(shell source $(REPO_ROOT)/config && echo $${IMG_NAME})' \
 	  DEPLOY_DIR=$(DEPLOY_DIR) \

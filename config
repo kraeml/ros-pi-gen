@@ -38,3 +38,6 @@ export ENABLE_CLOUD_INIT=1
 # Radio per WirelessEnabled=false deaktivieren; AccessPopup würde es sonst
 # erst alle 2 Minuten reaktivieren. Überschreibbar per Umgebungsvariable.
 export WPA_COUNTRY="${WPA_COUNTRY:-DE}"
+# APT_PROXY: Optional. Wird von außen gesetzt (z. B. APT_PROXY=http://proxy:3142 make build).
+# pi-gen prüft selbst die Erreichbarkeit (build.sh, Zeile 303).
+export APT_PROXY="${APT_PROXY:-}"
