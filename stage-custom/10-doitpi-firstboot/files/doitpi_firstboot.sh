@@ -131,9 +131,8 @@ if [[ -n "${CHANGED_FILES}" ]]; then
     NEEDS_REBOOT=true
 fi
 
-# Codeserver für den neuen Benutzer aktivieren
-log "Aktiviere codeserver für Benutzer ${USER_NAME}."
-systemctl enable "codeserver@${USER_NAME}.socket"
+# Codeserver für den neuen Benutzer aktivieren.
+systemctl enable "code-server@${USER_NAME}.service"
 
 # Build-Hilfsdatei entfernen: Sie erzwingt bei Paket-Updates immer die neue
 # Konfigurationsdatei des Pakets und würde eigene Anpassungen überschreiben.
