@@ -20,7 +20,7 @@
 - name: Aktiviere code-server Systemd-Dienst für Zielbenutzer
   ansible.builtin.systemd:
     name: "code-server@{{ robot_codeserver_user }}"
-    enabled: true
+    enabled: false
     # state: started entfällt im Chroot-Build, da systemd nicht als PID 1 läuft
 
 - name: Erstelle Konfigurationsverzeichnis für Zielbenutzer

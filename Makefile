@@ -94,6 +94,7 @@ VM_NAME     ?= ros-pi-gen
 # pi-gen-Submodul-Pin (arm64-Branch). Regelmäßig auf Aktualität prüfen:
 #   git -C pi-gen fetch origin arm64 && git -C pi-gen log origin/arm64 -1
 # Updates nur per bewusster Pin-Änderung (nie automatisch — siehe README).
+# Updates auch in tests/test_q0_image_stand.py eintragen.
 PIGEN_COMMIT    := d346cd5
 VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 
