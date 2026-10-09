@@ -133,7 +133,7 @@ fi
 
 # Codeserver für den neuen Benutzer aktivieren
 log "Aktiviere codeserver für Benutzer ${USER_NAME}."
-systemctl enable codeserver@${USER_NAME}.socket
+systemctl enable "codeserver@${USER_NAME}.socket"
 
 # Build-Hilfsdatei entfernen: Sie erzwingt bei Paket-Updates immer die neue
 # Konfigurationsdatei des Pakets und würde eigene Anpassungen überschreiben.

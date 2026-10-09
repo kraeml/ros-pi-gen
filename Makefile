@@ -306,6 +306,7 @@ publish-s3-production-manifests: venv
 release-version:
 	@python3 $(REPO_ROOT)/tools/release_preflight.py --suggest-version --remote "$(REMOTE)"
 
+release: lint
 release: export RELEASE_TAG = $(TAG)
 release: export RELEASE_REMOTE = $(REMOTE)
 release: venv
