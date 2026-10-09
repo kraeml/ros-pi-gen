@@ -8,7 +8,7 @@ import pytest
 
 from helpers.imageio import ImagePack
 
-PINNED_PI_GEN_COMMIT = "74d08a3"
+PINNED_PI_GEN_COMMIT = "d346cd5"
 
 
 @pytest.mark.usefixtures("pack")
