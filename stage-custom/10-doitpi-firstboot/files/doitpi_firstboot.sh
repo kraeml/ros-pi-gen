@@ -5,6 +5,7 @@
 #   - Ansible und Python-Interpreter prüfen (Warnung bei Fehler, kein Abbruch)
 #   - Alte Benutzer- und Pfadangaben (/home/pi, User=pi) in systemd-Units ersetzen
 #   - Ersten Start als erledigt markieren und bei Änderungen sauber neu starten
+#   - Alte /home/pi-Pfade im Home-Verzeichnis des Benutzers ersetzen
 
 # Bei Fehlern, nicht gesetzten Variablen und fehlschlagenden Pipes abbrechen
 set -euo pipefail
@@ -119,7 +120,7 @@ CHANGED_FILES=""
 if [[ "${USER_NAME}" != "pi" ]]; then
     CHANGED_FILES=$(
         {
-            replace_in_files '/home/pi' "${USER_HOME}" /etc/systemd/system
+            replace_in_files '/home/pi\b' "${USER_HOME}" /etc/systemd/system
             replace_in_files '^User=pi$' "User=${USER_NAME}" /etc/systemd/system
         } | sort -u
     )
@@ -133,6 +134,49 @@ fi
 
 # Codeserver für den neuen Benutzer aktivieren.
 systemctl enable "code-server@${USER_NAME}.service"
+
+# --- Home-Verzeichnis: alte /home/pi-Pfade ersetzen ---------------------------
+# Python-venvs (Shebangs, pyvenv.cfg, activate-Skripte), ~/.bashrc und andere
+# Dateien im Home-Verzeichnis enthalten absolute Pfade auf /home/pi und
+# funktionieren nach dem Umzug auf einen anderen Benutzer nicht mehr.
+# Statt eine feste Liste zu pflegen, wird das gesamte Home-Verzeichnis
+# durchsucht. Bei Treffern wird ein Neustart angefordert, damit alle Dienste
+# und Sitzungen mit den angepassten Dateien starten.
+if [[ "${USER_NAME}" != "pi" ]]; then
+
+    # Dateien mit Treffer sammeln:
+    #   --binary-files=without-match : Binärdateien überspringen
+    #   --null / mapfile -d ''       : Dateinamen mit Leerzeichen bleiben heil
+    #   --exclude-dir=.cache         : Cache-Inhalte sind reproduzierbar und
+    #                                  müssen nicht angepasst werden
+    #   || true                      : "keine Treffer" (Exit-Code 1) ist ein
+    #                                  normaler Zustand und darf wegen
+    #                                  "set -e" nicht zum Abbruch führen
+    #   \b (Wortgrenze) verhindert Fehlersetzungen in Pfaden wie /home/pixel.
+    #   "/home/pi/platformio-env" wird korrekt erkannt, weil auf das "i"
+    #   ein "/" folgt. \b setzt GNU grep und GNU sed voraus (Standard auf
+    #   Raspberry Pi OS).
+    mapfile -d '' home_files < <(
+        grep --recursive --binary-files=without-match --files-with-matches \
+             --null --no-messages \
+             --exclude-dir=.cache \
+             '/home/pi\b' "${USER_HOME}" || true
+    )
+
+    if (( ${#home_files[@]} > 0 )); then
+        log "Ersetze /home/pi in ${#home_files[@]} Dateien unter ${USER_HOME}."
+
+        # \b (Wortgrenze) verhindert Fehlersetzungen in Pfaden wie /home/pixel.
+        # "/home/pi/platformio-env" wird korrekt erkannt, weil auf das "i"
+        # ein "/" folgt. \b setzt GNU sed voraus (Standard auf Raspberry Pi OS).
+        sed --in-place "s|/home/pi\b|${USER_HOME}|g" "${home_files[@]}"
+
+        # sed --in-place legt intern eine neue Datei an. Läuft das Skript als
+        # root, kann der Besitzer dabei wechseln; chown stellt ihn wieder her.
+        chown --no-dereference "${USER_NAME}:" "${home_files[@]}"
+        NEEDS_REBOOT=true
+    fi
+fi
 
 # Build-Hilfsdatei entfernen: Sie erzwingt bei Paket-Updates immer die neue
 # Konfigurationsdatei des Pakets und würde eigene Anpassungen überschreiben.
