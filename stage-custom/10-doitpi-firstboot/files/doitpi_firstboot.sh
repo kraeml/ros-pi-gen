@@ -9,6 +9,10 @@
 # Bei Fehlern, nicht gesetzten Variablen und fehlschlagenden Pipes abbrechen
 set -euo pipefail
 
+# Log-Umleitung: Alle Ausgaben (stdout + stderr) in Datei UND auf Bildschirm
+exec 1> >(tee -a /var/log/doitpi_firstboot.log)
+exec 2>&1
+
 # Hilfsfunktion: Meldung mit Zeitstempel auf stderr ausgeben
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" >&2
@@ -42,7 +46,7 @@ except (OSError, KeyError, TypeError, ValueError):
     sys.exit(2)
 if not isinstance(stage, dict) or not isinstance(stage.get("errors"), list):
     sys.exit(2)
-sys.exit(0 if stage.get("end") and not stage["errors"] else 1)
+sys.exit(0 if (stage.get("end") or stage.get("finished")) and not stage["errors"] else 1)
 PY
 }
 
@@ -115,7 +119,7 @@ CHANGED_FILES=""
 if [[ "${USER_NAME}" != "pi" ]]; then
     CHANGED_FILES=$(
         {
-            replace_in_files '/home/pi\(/\|$\)' "${USER_HOME}\1" /etc/systemd/system
+            replace_in_files '/home/pi' "${USER_HOME}" /etc/systemd/system
             replace_in_files '^User=pi$' "User=${USER_NAME}" /etc/systemd/system
         } | sort -u
     )
@@ -126,6 +130,10 @@ if [[ -n "${CHANGED_FILES}" ]]; then
     log "Units geändert, Neustart wird nötig."
     NEEDS_REBOOT=true
 fi
+
+# Codeserver für den neuen Benutzer aktivieren
+log "Aktiviere codeserver für Benutzer ${USER_NAME}."
+systemctl enable codeserver@${USER_NAME}.socket
 
 # Build-Hilfsdatei entfernen: Sie erzwingt bei Paket-Updates immer die neue
 # Konfigurationsdatei des Pakets und würde eigene Anpassungen überschreiben.
