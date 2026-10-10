@@ -115,7 +115,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(STAGE_DIR)/10-doitpi-firstboot/files/doitpi_firstboot.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests release-preflight release-version release clean-release-stage ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test ensure-nft-helper package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests release-preflight release-version release clean-release-stage ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -130,6 +130,7 @@ help:
 	@echo "                                CONTINUE=1 Weiterbau im Container (überspringt Stale-Guard),"
 	@echo "                                SKIP_IMAGES_BUILD=1 Iteration ohne Image-Export)"
 	@echo "  make test                     Testinfra (Gruppe Q) gegen das Image in deploy/ — Volltestlauf"
+	@echo "  make ensure-nft-helper        nft-Syntaxprüfungs-Hilfsimage bauen oder aus Docker-Cache nutzen"
 	@echo "  make package                  Imager-Paket (BASE_URL explizit setzen)"
 	@echo "  make clean-release-stage CLEAN_RELEASE_STAGE=1  bestätigten Stale-Stage-Cache entfernen"
 	@echo "  make package-release          Headless-Testpaket für Gate 2 vorbereiten"
@@ -171,7 +172,7 @@ venv: $(VENV)/.deps.stamp
 lint: venv guard-pigen
 	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py $(REPO_ROOT)/tools/github_release.py $(REPO_ROOT)/tools/release_preflight.py $(REPO_ROOT)/tools/release.py
 	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
-	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py tests/test_release_preflight.py tests/test_release.py -q
+	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_nft_helper.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py tests/test_release_preflight.py tests/test_release.py -q
 
 # --- setup ------------------------------------------------------------------
 # Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs
@@ -247,6 +248,9 @@ endif
 # --- test -------------------------------------------------------------------
 test: venv
 	$(VENV)/bin/python -m pytest tests $(TEST_ARGS)
+
+ensure-nft-helper:
+	@PYTHONPATH="$(REPO_ROOT)/tests" python3 -c 'from helpers.container import ensure_nft_helper; print(ensure_nft_helper())'
 
 package: venv
 	@test -n "$(BASE_URL)" || { echo "BASE_URL erforderlich, z. B. http://127.0.0.1:8000/" >&2; exit 1; }

@@ -86,7 +86,7 @@ def test_q6_nft_syntax(crun, pack):
     rules_file = pack.cache / "nft-check" / "accesspopup.rules"
     rules_file.parent.mkdir(parents=True, exist_ok=True)
     rules_file.write_text(imageio.debugfs_cat(pack.root_img, NFT_RULES_PATH))
-    cnt.ensure_nft_helper(pack.cache)
+    cnt.ensure_nft_helper()
     # --network host: der Docker-Netns dieser Kernel-Version bietet kein
     # NETLINK_NETFILTER; im Host-Netns funktioniert der nft-Dry-Run nativ
     # (amd64). '-c' prueft nur, es wird nichts angewendet.
