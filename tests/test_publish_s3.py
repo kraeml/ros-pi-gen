@@ -308,6 +308,10 @@ def test_publish_production_image_returns_metadata_without_touching_manifests(tm
 
     def fake_run_aws(args, *a, **k):
         calls.append(args)
+        if args[:2] == ["s3api", "head-object"]:
+            return publish_s3.subprocess.CompletedProcess(
+                args, 0, json.dumps({"ContentLength": metadata["image_download_size"], "ETag": '"etag"'}), ""
+            )
         return publish_s3.subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
@@ -326,10 +330,53 @@ def test_publish_production_image_returns_metadata_without_touching_manifests(tm
         "https://example.invalid/bucket",
     )
     assert result == metadata
+    assert [args[:2] for args in calls] == [
+        ["s3", "cp"],
+        ["s3api", "head-object"],
+        ["s3", "cp"],
+        ["s3", "cp"],
+    ]
+    assert calls[0][2] == str(tmp_path / "release" / metadata["image_file"])
+    assert calls[1][calls[1].index("--key") + 1] == calls[0][3].removeprefix("s3://ros-pi-gen-images/")
+    assert calls[2][2] == calls[0][3]
     # Keine Manifest-Objekte (os-list.json/headless-os-list.json) werden
     # von diesem Schritt hochgeladen -- nur Image und Icon.
     uploaded_sources = [args[2] for args in calls if args[:2] == ["s3", "cp"]]
     assert not any(str(path).endswith("os-list.json") for path in uploaded_sources)
+
+
+def test_production_image_hash_mismatch_is_distinct_from_missing_object(tmp_path, monkeypatch):
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setenv(publish_s3.PRODUCTION_WRITE_APPROVAL_ENV, "yes")
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: [])
+    calls = []
+
+    def fake_run_aws(args, *a, **k):
+        calls.append(args)
+        if args[:2] == ["s3api", "head-object"]:
+            return publish_s3.subprocess.CompletedProcess(
+                args, 0, json.dumps({"ContentLength": metadata["image_download_size"], "ETag": '"etag"'}), ""
+            )
+        return publish_s3.subprocess.CompletedProcess(args, 0, "", "")
+
+    def fake_download(key, destination, *args, **kwargs):
+        destination.write_bytes(b"downloaded-but-different")
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    monkeypatch.setattr(publish_s3, "download_for_verification", fake_download)
+    monkeypatch.setattr(publish_s3.package_image, "sha256_file", lambda path: "b" * 64)
+    with pytest.raises(publish_s3.PublishError, match="Hash weicht ab"):
+        publish_s3.publish_production_image(
+            tmp_path / "release",
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "https://example.invalid/bucket",
+        )
+    assert [args[:2] for args in calls] == [["s3", "cp"], ["s3api", "head-object"]]
 
 
 def test_publish_production_manifests_requires_prior_image_publish(tmp_path, monkeypatch):
@@ -478,6 +525,187 @@ def test_aws_cli_uses_minio_checksum_compatibility_settings(monkeypatch):
     publish_s3.run_aws(["s3", "ls"], "s3-intern-admin", publish_s3.EXPECTED_ENDPOINT, "eu-central-1")
     assert captured["env"]["AWS_REQUEST_CHECKSUM_CALCULATION"] == "when_required"
     assert captured["env"]["AWS_RESPONSE_CHECKSUM_VALIDATION"] == "when_required"
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "stdout", "stderr", "expected"),
+    [
+        (1, "An error occurred (404) when calling HeadObject: NoSuchKey", "", ("not_found", 404)),
+        (1, "An error occurred (403) when calling PutObject: AccessDenied", "", ("access_denied", 403)),
+        (1, "Provider text says (404), but no AWS error wrapper", "", ("unknown", None)),
+        (1, "NoSuchBucket", "", ("not_found", None)),
+        (1, "NoSuchKey", "", ("not_found", None)),
+        (1, "Profile not found", "", ("unknown", None)),
+        (1, "command not found", "", ("unknown", None)),
+        (1, "", "ReadTimeout: request timed out", ("timeout", None)),
+        (1, "", "EndpointConnectionError: Could not connect", ("connect", None)),
+        (1, "opaque provider detail", "", ("unknown", None)),
+    ],
+)
+def test_classify_aws_failure(exit_code, stdout, stderr, expected):
+    assert publish_s3.classify_aws_failure(exit_code, stdout, stderr) == expected
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_aws_cli_never_logs_fake_credentials_from_output_or_exception(monkeypatch, capsys, exit_code):
+    credential = "synthetic-credential-never-log-72f0a9"
+
+    def fake_run(command, **kwargs):
+        return publish_s3.subprocess.CompletedProcess(
+            command,
+            exit_code,
+            f"stdout {credential}",
+            f"stderr {credential} An error occurred (403) AccessDenied" if exit_code else f"stderr {credential}",
+        )
+
+    monkeypatch.setattr(publish_s3.subprocess, "run", fake_run)
+    error_text = ""
+    if exit_code:
+        with pytest.raises(publish_s3.AwsCliError) as error:
+            publish_s3.run_aws(["s3", "cp", "source", "destination"], "hetzner-prod", "https://example.invalid", "hel1")
+        error_text = str(error.value)
+    else:
+        publish_s3.run_aws(["s3", "cp", "source", "destination"], "hetzner-prod", "https://example.invalid", "hel1")
+    captured = capsys.readouterr()
+    assert credential not in captured.out + captured.err + error_text
+
+
+def test_aws_cli_unknown_failure_logs_only_output_lengths(monkeypatch, capsys):
+    def fake_run(command, **kwargs):
+        return publish_s3.subprocess.CompletedProcess(command, 1, "opaque", "unknown detail")
+
+    monkeypatch.setattr(publish_s3.subprocess, "run", fake_run)
+    with pytest.raises(publish_s3.AwsCliError) as error:
+        publish_s3.run_aws(["s3", "cp", "source", "destination"], "hetzner-prod", "https://example.invalid", "hel1")
+    output = capsys.readouterr().out
+    assert "error_class=unknown" in output
+    assert "stdout_length=6" in output
+    assert "stderr_length=14" in output
+    assert "opaque" not in output
+    assert "unknown detail" not in output
+    assert "opaque" not in str(error.value)
+    assert "unknown detail" not in str(error.value)
+
+
+@pytest.mark.parametrize("marker", ["NoSuchBucket", "NoSuchKey"])
+def test_not_found_markers_without_http_wrapper_are_classified(marker):
+    assert publish_s3.classify_aws_failure(1, marker, "") == ("not_found", None)
+
+
+def test_list_version_objects_maps_nosuchbucket_to_bucket_error(monkeypatch):
+    monkeypatch.setattr(
+        publish_s3,
+        "run_aws",
+        lambda *args, **kwargs: publish_s3.subprocess.CompletedProcess(
+            args, 1, "NoSuchBucket", ""
+        ),
+    )
+    with pytest.raises(publish_s3.PublishError, match="Bucket ros-pi-gen-images fehlt"):
+        publish_s3.list_version_objects(
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+            "ros-pi-gen/releases/2026.09.1/",
+        )
+
+
+def test_head_object_verification_reports_missing_object_separately(monkeypatch, capsys):
+    def fake_run_aws(args, *a, **k):
+        raise publish_s3.AwsCliError("s3api head-object", 1, "not_found", 404, 0, 0)
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    with pytest.raises(publish_s3.PublishError, match="Objekt nicht vorhanden"):
+        publish_s3.verify_uploaded_object(
+            "ros-pi-gen/releases/2026.09.1/roboter-os-2026.09.1-headless.img.xz",
+            12,
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+        )
+    assert "Existenzprüfung" in capsys.readouterr().out
+
+
+def test_head_object_cli_not_found_is_not_reported_as_missing_object(monkeypatch, capsys):
+    def fake_run(command, **kwargs):
+        return publish_s3.subprocess.CompletedProcess(command, 1, "command not found", "")
+
+    monkeypatch.setattr(publish_s3.subprocess, "run", fake_run)
+    with pytest.raises(publish_s3.PublishError, match="error_class=unknown") as error:
+        publish_s3.verify_uploaded_object(
+            "ros-pi-gen/releases/2026.09.1/roboter-os-2026.09.1-headless.img.xz",
+            12,
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+        )
+    output = capsys.readouterr().out + str(error.value)
+    assert "Objekt nicht vorhanden" not in output
+    assert "command not found" not in output
+
+
+def test_head_object_verification_checks_size(monkeypatch):
+    def fake_run_aws(args, *a, **k):
+        return publish_s3.subprocess.CompletedProcess(args, 0, '{"ContentLength": 11, "ETag": "etag"}', "")
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    with pytest.raises(publish_s3.PublishError, match="Objektgröße weicht ab"):
+        publish_s3.verify_uploaded_object(
+            "ros-pi-gen/releases/2026.09.1/roboter-os-2026.09.1-headless.img.xz",
+            12,
+            "hetzner-prod",
+            "https://hel1.your-objectstorage.com",
+            "hel1",
+        )
+
+
+def test_head_object_logs_only_allowlisted_metadata(monkeypatch, capsys):
+    secret_field = "synthetic-private-header-credential"
+
+    def fake_run_aws(args, *a, **k):
+        return publish_s3.subprocess.CompletedProcess(
+            args,
+            0,
+            json.dumps({
+                "ContentLength": 12,
+                "ETag": '"safe-etag"',
+                "LastModified": "2026-09-26T00:00:00Z",
+                "Sensitive": secret_field,
+            }),
+            "",
+        )
+
+    monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
+    publish_s3.verify_uploaded_object(
+        "ros-pi-gen/releases/2026.09.1/roboter-os-2026.09.1-headless.img.xz",
+        12,
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+    )
+    output = capsys.readouterr().out
+    assert secret_field not in output
+    assert "ContentLength=12" in output
+    assert 'ETag="safe-etag"' in output
+    assert "LastModified=2026-09-26T00:00:00Z" in output
+
+
+def test_production_image_dry_run_logs_without_upload(tmp_path, monkeypatch, capsys):
+    metadata = make_variant_package(
+        tmp_path / "release", "headless", version="2026.09.1", status="production"
+    )
+    monkeypatch.setattr(publish_s3, "validate_production_package", lambda path: metadata)
+    monkeypatch.setattr(publish_s3, "list_version_objects", lambda *args: pytest.fail("dry-run queried S3"))
+    publish_s3.publish_production_image(
+        tmp_path / "release",
+        "hetzner-prod",
+        "https://hel1.your-objectstorage.com",
+        "hel1",
+        "https://example.invalid/bucket",
+        dry_run=True,
+    )
+    output = capsys.readouterr().out
+    assert "dry_run=true" in output
+    assert "kein Upload ausgeführt" in output
 
 
 def test_version_scan_fails_closed_on_permission_error(monkeypatch):

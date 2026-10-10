@@ -77,6 +77,23 @@ class PublishError(RuntimeError):
     pass
 
 
+class AwsCliError(PublishError):
+    def __init__(self, operation: str, exit_code: int, error_class: str, http_status: int | None, stdout_length: int, stderr_length: int):
+        self.operation = operation
+        self.exit_code = exit_code
+        self.error_class = error_class
+        self.http_status = http_status
+        self.stdout_length = stdout_length
+        self.stderr_length = stderr_length
+        details = (
+            f"AWS CLI fehlgeschlagen: operation={operation}; exit_code={exit_code}; "
+            f"error_class={error_class}; http_status={http_status if http_status is not None else 'none'}"
+        )
+        if error_class == "unknown":
+            details += f"; stdout_length={stdout_length}; stderr_length={stderr_length}"
+        super().__init__(details)
+
+
 def resolve_target(profile: str, endpoint: str, region: str) -> dict:
     """Findet den Zielnamen, dessen Profil+Endpoint+Region exakt dem
     übergebenen Tripel entspricht. Kein Eintrag passt -> PublishError
@@ -92,6 +109,22 @@ def resolve_target(profile: str, endpoint: str, region: str) -> dict:
     )
 
 
+def classify_aws_failure(exit_code: int, stdout: str, stderr: str) -> tuple[str, int | None]:
+    diagnostic = f"{stdout}\n{stderr}"
+    status_match = re.search(r"An error occurred\s+\((\d{3})\)", diagnostic, re.IGNORECASE)
+    http_status = int(status_match.group(1)) if status_match else None
+    markers = diagnostic.lower()
+    if http_status == 403 or any(marker in markers for marker in ("accessdenied", "invalidaccesskeyid", "signaturedoesnotmatch")):
+        return "access_denied", http_status
+    if http_status == 404 or any(marker in markers for marker in ("nosuchkey", "nosuchbucket")):
+        return "not_found", http_status
+    if any(marker in markers for marker in ("timed out", "readtimeout")):
+        return "timeout", http_status
+    if any(marker in markers for marker in ("could not connect", "endpointconnectionerror", "name or service not known")):
+        return "connect", http_status
+    return "unknown", http_status
+
+
 def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_failure: bool = False) -> subprocess.CompletedProcess:
     command = [
         "aws",
@@ -104,16 +137,82 @@ def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_
     environment["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
     environment["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
     result = subprocess.run(command, capture_output=True, text=True, env=environment)
-    if result.returncode and not allow_failure:
-        details = result.stderr.strip() or result.stdout.strip()
-        raise PublishError(f"AWS CLI fehlgeschlagen ({result.returncode}): {details}")
+    operation = " ".join(args[:2])
+    if result.returncode == 0:
+        print(f"AWS CLI Ergebnis: operation={operation}; exit_code=0")
+        return result
+    error_class, http_status = classify_aws_failure(result.returncode, result.stdout, result.stderr)
+    status = http_status if http_status is not None else "none"
+    print(
+        f"AWS CLI Ergebnis: operation={operation}; exit_code={result.returncode}; "
+        f"error_class={error_class}; http_status={status}"
+        + (
+            f"; stdout_length={len(result.stdout)}; stderr_length={len(result.stderr)}"
+            if error_class == "unknown" else ""
+        )
+    )
     allowed_read_checks = {
         ("s3api", "list-objects-v2"),
     }
-    if result.returncode and allow_failure and tuple(args[:2]) not in allowed_read_checks:
-        details = result.stderr.strip() or result.stdout.strip()
-        raise PublishError(f"AWS CLI-Leseprüfung fehlgeschlagen ({result.returncode}): {details}")
+    if not allow_failure or tuple(args[:2]) not in allowed_read_checks:
+        raise AwsCliError(
+            operation,
+            result.returncode,
+            error_class,
+            http_status,
+            len(result.stdout),
+            len(result.stderr),
+        )
     return result
+
+
+def verify_uploaded_object(
+    key: str,
+    expected_size: int,
+    profile: str,
+    endpoint: str,
+    region: str,
+) -> None:
+    print(f"S3-Upload-Existenzprüfung (HeadObject): bucket={BUCKET}; key={key}")
+    try:
+        response = run_aws(
+            [
+                "s3api", "head-object",
+                "--bucket", BUCKET,
+                "--key", key,
+                "--query", "{ContentLength:ContentLength,ETag:ETag,LastModified:LastModified}",
+                "--output", "json",
+            ],
+            profile,
+            endpoint,
+            region,
+        )
+    except AwsCliError as error:
+        if error.error_class == "not_found":
+            raise PublishError(f"S3-Upload-Existenzprüfung fehlgeschlagen: Objekt nicht vorhanden: {key}") from error
+        status = error.http_status if error.http_status is not None else "none"
+        raise PublishError(
+            f"S3-Upload-Existenzprüfung fehlgeschlagen für {key}: "
+            f"error_class={error.error_class}; http_status={status}"
+        ) from error
+    except PublishError as error:
+        raise PublishError(f"S3-Upload-Existenzprüfung fehlgeschlagen für {key}") from error
+    try:
+        metadata = json.loads(response.stdout)
+    except json.JSONDecodeError as error:
+        raise PublishError(f"S3-Upload-Existenzprüfung lieferte ungültige Metadaten für {key}") from error
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("ContentLength"), int):
+        raise PublishError(f"S3-Upload-Existenzprüfung lieferte keine Objektgröße für {key}")
+    if metadata["ContentLength"] != expected_size:
+        raise PublishError(
+            f"S3-Upload-Existenzprüfung: Objektgröße weicht ab für {key} "
+            f"(erwartet {expected_size}, erhalten {metadata['ContentLength']})"
+        )
+    print(
+        f"S3-Upload-Existenzprüfung erfolgreich: bucket={BUCKET}; key={key}; "
+        f"ContentLength={metadata['ContentLength']}; ETag={metadata.get('ETag', '(unbekannt)')}; "
+        f"LastModified={metadata.get('LastModified', '(unbekannt)')}"
+    )
 
 
 # Nach-Upload-Downloadverifikation braucht robustere Netzwerk-Defaults als
@@ -351,10 +450,14 @@ def list_version_objects(profile: str, endpoint: str, region: str, prefix: str) 
         allow_failure=True,
     )
     if response.returncode:
-        details = response.stderr.strip() or response.stdout.strip()
-        if any(marker in details for marker in ("NoSuchBucket", "Not Found", "404")):
+        error_class, http_status = classify_aws_failure(response.returncode, response.stdout, response.stderr)
+        if error_class == "not_found":
             raise PublishError(f"Bucket {BUCKET} fehlt oder ist nicht erreichbar; Anlage ist nicht Teil des Publishers")
-        raise PublishError(f"Version kann nicht sicher auf Wiederverwendung geprüft werden: {details}")
+        status = http_status if http_status is not None else "none"
+        raise PublishError(
+            f"Version kann nicht sicher auf Wiederverwendung geprüft werden: "
+            f"error_class={error_class}; http_status={status}"
+        )
     try:
         result = json.loads(response.stdout)
     except json.JSONDecodeError as error:
@@ -576,6 +679,13 @@ def publish_production_image(
         _require_https_base(base)
     image_name = f"roboter-os-{version}-headless.img.xz"
     image_key = f"{PRODUCTION_PREFIX}/releases/{version}/{image_name}"
+    image_path = package_dir / image_name
+    image_size = image_path.stat().st_size
+    print(
+        f"S3-Produktionsziel: target=hetzner; profile={profile}; endpoint={endpoint}; region={region}; "
+        f"bucket={BUCKET}; key={image_key}; source={image_path}; size={image_size}; "
+        f"sha256={metadata['image_download_sha256']}; dry_run={str(dry_run).lower()}"
+    )
 
     with tempfile.TemporaryDirectory(prefix="ros-pi-gen-production-image-publish-") as temporary:
         temp_dir = Path(temporary)
@@ -588,18 +698,31 @@ def publish_production_image(
         if objects:
             raise PublishError(f"Version {version} enthält bereits Objekte unter {PRODUCTION_PREFIX}; nächste Version erforderlich")
         if dry_run:
+            print(f"Produktions-Image Dry-Run: kein Upload ausgeführt; bucket={BUCKET}; key={image_key}")
             return metadata
         _require_https_base(base)
+        print(
+            f"S3-Image-Upload startet: bucket={BUCKET}; key={image_key}; "
+            f"source={image_path}; size={image_size}"
+        )
         run_aws(
-            ["s3", "cp", str(package_dir / image_name), f"s3://{BUCKET}/{image_key}", "--no-progress"],
+            ["s3", "cp", str(image_path), f"s3://{BUCKET}/{image_key}", "--no-progress"],
             profile,
             endpoint,
             region,
         )
+        print(f"S3-Image-Upload-CLI erfolgreich zurückgekehrt: bucket={BUCKET}; key={image_key}")
+        verify_uploaded_object(image_key, image_size, profile, endpoint, region)
         remote_image = temp_dir / f"download-{image_name}"
+        print(f"S3-Download-/Hashverifikation startet: bucket={BUCKET}; key={image_key}")
         download_for_verification(image_key, remote_image, profile, endpoint, region, error_prefix="Produktions")
-        if package_image.sha256_file(remote_image) != metadata["image_download_sha256"]:
-            raise PublishError("Nach Upload geladene Prüfsumme stimmt für Headless nicht")
+        actual_sha256 = package_image.sha256_file(remote_image)
+        if actual_sha256 != metadata["image_download_sha256"]:
+            raise PublishError(
+                "S3-Download-/Hashverifikation fehlgeschlagen: Hash weicht ab für Headless "
+                f"(erwartet {metadata['image_download_sha256']}, erhalten {actual_sha256})"
+            )
+        print(f"S3-Download-/Hashverifikation erfolgreich: bucket={BUCKET}; key={image_key}; sha256={actual_sha256}")
         run_aws(
             ["s3", "cp", str(package_dir / "roboter-os.svg"), f"s3://{BUCKET}/{PRODUCTION_PREFIX}/releases/{version}/roboter-os.svg", "--no-progress"],
             profile,
