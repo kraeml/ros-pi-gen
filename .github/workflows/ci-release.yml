@@ -180,11 +180,31 @@ jobs:
       - name: GitHub-Wiederverwendung unmittelbar vor S3-Schreibzugriff ausschließen
         run: make release-preflight TAG="$RELEASE_TAG" PREFLIGHT_MODE=ci GITHUB_ONLY=1
 
+      - name: Diagnose vor S3-Upload
+        run: |
+          echo "== Diagnose VOR Upload-Schritt =="
+          aws --version
+          df -h / /tmp "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
+          df -i /tmp
+          du -sh package/headless-release-production 2>/dev/null || true
+          ls -la package/headless-release-production 2>/dev/null || true
+
       # Schritt 1/5 (siehe Kopfkommentar): Image + Icon zuerst.
       - name: "S3 (1/2): Produktions-Image + Icon veröffentlichen"
+        id: upload
         env:
           ROS_PI_GEN_PRODUCTION_WRITE_APPROVED: "yes"
         run: make publish-s3-production-image
+
+      - name: Diagnose nach S3-Upload-Schritt
+        if: always()
+        run: |
+          echo "== Diagnose NACH Upload-Schritt (Status: ${{ steps.upload.outcome }}) =="
+          aws --version
+          df -h / /tmp "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
+          df -i /tmp
+          du -sh package/headless-release-production 2>/dev/null || true
+          ls -la package/headless-release-production 2>/dev/null || true
 
       # Schritt 2/5: Draft mit allen vier Assets, nur authentifiziert
       # geprüft (siehe tools/github_release.py).
