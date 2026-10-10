@@ -60,6 +60,34 @@ jobs:
 
       - uses: docker/setup-qemu-action@v4
 
+      - name: Restore nft helper image cache
+        id: nft-helper-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: tests/.cache/nft-helper.tar
+          key: ${{ runner.os }}-amd64-nft-helper-v1-${{ hashFiles('tests/docker/nft-helper/Dockerfile') }}
+
+      - name: Load cached nft helper image
+        if: steps.nft-helper-cache.outputs.cache-hit == 'true'
+        run: |
+          docker load --input tests/.cache/nft-helper.tar
+          docker image inspect ros-pigen-tests-nft:1 >/dev/null
+
+      - name: Build and cache nft helper image
+        if: steps.nft-helper-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 50
+        run: |
+          make ensure-nft-helper
+          mkdir -p tests/.cache
+          docker save --output tests/.cache/nft-helper.tar ros-pigen-tests-nft:1
+
+      - name: Save nft helper image cache
+        if: steps.nft-helper-cache.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v6
+        with:
+          path: tests/.cache/nft-helper.tar
+          key: ${{ steps.nft-helper-cache.outputs.cache-primary-key }}
+
       - run: make venv
 
       - name: Setup (headless)
