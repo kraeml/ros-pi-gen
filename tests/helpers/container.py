@@ -3,6 +3,7 @@ ausfuehren, systemd-Container-Boot fuer Q1a."""
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import time
@@ -94,31 +95,64 @@ def start_systemd(tag: str, name: str) -> None:
 
 
 NFT_HELPER_TAG = "ros-pigen-tests-nft:1"
+NFT_HELPER_DOCKERFILE = Path(__file__).resolve().parents[1] / "docker" / "nft-helper" / "Dockerfile"
+NFT_HELPER_BUILD_TIMEOUT = 600
+NFT_HELPER_RETRY_DELAYS = (5, 15, 45)
+NFT_HELPER_TRANSIENT_REGISTRY_ERROR = re.compile(
+    r"https?://registry-1\.docker\.io(?::\d+)?/\S*?:\s+(?:429|5\d\d)\b",
+    re.IGNORECASE,
+)
 
 
-def ensure_nft_helper(cache_dir: Path) -> str:
-    """amd64-Hilfsimage mit nftables (einmalig gebaut, dann gecached).
-    qemu-user 6.2 laesst NETLINK_NETFILTER nicht durch (Whitelist) und der
-    Docker-Netns ebenfalls nicht – der nft-Dry-Run laeuft deshalb nativ im
-    amd64-Hilfscontainer."""
+def _build_nft_helper() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "docker", "build", "--platform", "linux/amd64", "-q", "-t", NFT_HELPER_TAG,
+            "-f", str(NFT_HELPER_DOCKERFILE), str(NFT_HELPER_DOCKERFILE.parent),
+        ],
+        capture_output=True, text=True, timeout=NFT_HELPER_BUILD_TIMEOUT,
+    )
+
+
+def _is_transient_registry_error(stderr: str) -> bool:
+    return bool(NFT_HELPER_TRANSIENT_REGISTRY_ERROR.search(stderr))
+
+
+def ensure_nft_helper() -> str:
+    """Build a native amd64 helper for nft syntax checks when it is not cached locally."""
     if image_exists(NFT_HELPER_TAG):
         return NFT_HELPER_TAG
-    ctx = cache_dir / "nft-helper"
-    ctx.mkdir(parents=True, exist_ok=True)
-    dockerfile = ctx / "Dockerfile"
-    if not dockerfile.exists():
-        dockerfile.write_text(
-            "FROM debian:trixie\n"
-            "RUN apt-get update -qq && apt-get install -qq -y --no-install-recommends"
-            " nftables && rm -rf /var/lib/apt/lists/*\n"
+    if not NFT_HELPER_DOCKERFILE.is_file():
+        raise DockerError(f"nft-Hilfsimage-Dockerfile fehlt: {NFT_HELPER_DOCKERFILE}")
+
+    for attempt in range(len(NFT_HELPER_RETRY_DELAYS) + 1):
+        try:
+            proc = _build_nft_helper()
+        except subprocess.TimeoutExpired as error:
+            raise DockerError(
+                f"nft-Hilfsimage-Build nach {NFT_HELPER_BUILD_TIMEOUT}s abgebrochen"
+            ) from error
+        except OSError as error:
+            raise DockerError(f"nft-Hilfsimage-Build konnte nicht gestartet werden: {error}") from error
+
+        if proc.returncode == 0:
+            if not image_exists(NFT_HELPER_TAG):
+                raise DockerError("nft-Hilfsimage-Build war erfolgreich, aber das Image fehlt.")
+            return NFT_HELPER_TAG
+
+        stderr = proc.stderr or ""
+        if not _is_transient_registry_error(stderr) or attempt == len(NFT_HELPER_RETRY_DELAYS):
+            raise DockerError(f"nft-Hilfsimage-Build fehlgeschlagen:\n{stderr}")
+
+        delay = NFT_HELPER_RETRY_DELAYS[attempt]
+        print(
+            f"nft-Hilfsimage-Build: temporärer Docker-Hub-Fehler; "
+            f"Versuch {attempt + 2}/{len(NFT_HELPER_RETRY_DELAYS) + 1} in {delay}s.",
+            flush=True,
         )
-    proc = subprocess.run(
-        ["docker", "build", "-q", "-t", NFT_HELPER_TAG, str(ctx)],
-        capture_output=True, text=True, timeout=600,
-    )
-    if proc.returncode != 0:
-        raise DockerError(f"nft-Hilfsimage-Build fehlgeschlagen:\n{proc.stderr}")
-    return NFT_HELPER_TAG
+        time.sleep(delay)
+
+    raise DockerError("nft-Hilfsimage-Build wurde unerwartet beendet.")
 
 
 def logs(name: str) -> str:

@@ -9,6 +9,7 @@ __pycache__/
 /deploy/
 /package/
 /.cache/
+/tests/.cache/
 
 # Varianten-Umschalter (make VARIANT=… — make setup setzt sie zurück)
 stage-custom/06-variant-headless/SKIP
