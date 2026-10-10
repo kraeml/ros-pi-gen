@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 import package_image
-import publish_s3
+
 
 REPOSITORY = "kraeml/ros-pi-gen"
 TAG_PATTERN = re.compile(r"^image-\d{4}\.\d{2}\.\d+$")
@@ -126,29 +126,12 @@ def ensure_github_release_absent(tag: str) -> None:
         )
 
 
-def ensure_s3_version_absent(version: str) -> None:
-    target = publish_s3.TARGETS["hetzner"]
-    prefix = f"{publish_s3.PRODUCTION_PREFIX}/releases/{version}/"
-    try:
-        objects = publish_s3.list_version_objects(
-            target["profile"], target["endpoint"], target["region"], prefix
-        )
-    except publish_s3.PublishError as error:
-        raise PreflightError(f"Hetzner-Version konnte nicht sicher geprüft werden: {error}") from error
-    if objects:
-        raise PreflightError(
-            f"S3-Versionspfad ist bereits belegt: {prefix} ({len(objects)} Objekt(e)); "
-            "diese Version nicht wiederverwenden"
-        )
-
-
 def run_preflight(
     tag: str,
     *,
     mode: str,
     remote: str = "origin",
     expected_commit: str | None = None,
-    github_only: bool = False,
     candidate: bool = False,
 ) -> None:
     if candidate:
@@ -160,9 +143,6 @@ def run_preflight(
     elif mode != "ci":
         raise PreflightError(f"Unbekannter Preflight-Modus: {mode}")
     ensure_github_release_absent(tag)
-    if not github_only:
-        version = tag.removeprefix("image-")
-        ensure_s3_version_absent(version)
 
 
 def main() -> int:
@@ -173,7 +153,6 @@ def main() -> int:
     parser.add_argument("--mode", choices=("local", "ci"), default="local")
     parser.add_argument("--remote", default="origin")
     parser.add_argument("--expected-commit")
-    parser.add_argument("--github-only", action="store_true")
     args = parser.parse_args()
     if args.suggest_version == bool(args.tag):
         parser.error("genau eines von --suggest-version oder --tag ist erforderlich")
@@ -188,7 +167,6 @@ def main() -> int:
             mode=args.mode,
             remote=args.remote,
             expected_commit=args.expected_commit,
-            github_only=args.github_only,
             candidate=args.candidate,
         )
     except (PreflightError, OSError, subprocess.CalledProcessError) as error:

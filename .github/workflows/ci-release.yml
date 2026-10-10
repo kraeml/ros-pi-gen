@@ -11,36 +11,11 @@ name: release
 # -test-Suffixe bereits aus; der zusätzliche Laufzeit-Guard unten prüft
 # zusätzlich das exakte CalVer-Format.
 #
-# Reihenfolge (AGENTS.md, durchgehende Regeln + Etappe 4): Images zuerst
-# hochladen und verifizieren, versionierte Manifestkopien unveränderlich
-# archivieren und stabile Manifestobjekte erst nach erfolgreichem
-# Image-Upload und erfolgreicher Archivierung zuletzt aktualisieren;
-# GitHub-Release erst nach erfolgreicher S3-Aktualisierung
-# veröffentlichen, damit `latest` nicht vor dem maßgeblichen S3-Stand
-# umspringt:
-#   1. S3: Image + Icon hochladen, anonym per HTTPS verifizieren
-#      (make publish-s3-production-image).
-#   2. GitHub: Draft-Release mit allen vier Assets (Image, Manifest,
-#      SHA256SUMS, Icon) erstellen; Assets NUR über die authentifizierte
-#      API prüfen -- niemals anonym vor Veröffentlichung.
-#   3. S3: versioniertes, dann stabiles Manifest hochladen und
-#      verifizieren (make publish-s3-production-manifests).
-#   4. GitHub: Draft veröffentlichen und als latest markieren.
-#   5. GitHub: anonymen Redirect/Zugriff auf das veröffentlichte
-#      Image-Asset prüfen. Scheitert dieser letzte Schritt, bleibt das
-#      Release veröffentlicht stehen (AGENTS.md: "Release nicht
-#      automatisch zurückziehen") -- der Lauf meldet den Fehlschlag.
-#
 # Headless-only-Übergangsregelung (AGENTS.md): solange Desktop nicht
-# bereitgestellt ist, baut und veröffentlicht dieser Workflow
-# ausschließlich die Variante headless (ein Image, ein
-# GitHub-Manifestasset headless-os-list.json, SHA256SUMS mit genau
-# diesem Dateinamen, zusätzlich das Imager-Icon als eigenständiges
-# 4. GitHub-Asset -- siehe tools/github_release.py).
+# bereitgestellt ist, veröffentlicht dieser Workflow ausschließlich
+# headless (Image, headless-os-list.json, SHA256SUMS und Icon).
 #
-# Secrets (manuell als Repo-Secrets anzulegen, siehe README.md):
-# HETZNER_ACCESS_KEY_ID, HETZNER_SECRET_ACCESS_KEY. GITHUB_TOKEN wird von
-# GitHub Actions automatisch bereitgestellt.
+# GITHUB_TOKEN wird von GitHub Actions automatisch bereitgestellt.
 #
 # Vor jedem echten Tag-Push, der diesen Workflow auslösen kann: Gate 4
 # (AGENTS.md) -- ausdrückliche Freigabe erforderlich.
@@ -75,16 +50,7 @@ jobs:
       - name: Python-Umgebung für Preflight
         run: make venv
 
-      - name: AWS-CLI-Profil hetzner-prod für Read-only-Preflight konfigurieren
-        env:
-          HETZNER_ACCESS_KEY_ID: ${{ secrets.HETZNER_ACCESS_KEY_ID }}
-          HETZNER_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_SECRET_ACCESS_KEY }}
-        run: |
-          aws configure set aws_access_key_id "$HETZNER_ACCESS_KEY_ID" --profile hetzner-prod
-          aws configure set aws_secret_access_key "$HETZNER_SECRET_ACCESS_KEY" --profile hetzner-prod
-          aws configure set region hel1 --profile hetzner-prod
-
-      - name: Produktions-Preflight vor Build und Upload
+      - name: Produktions-Preflight vor Build
         run: make release-preflight TAG="$RELEASE_TAG" PREFLIGHT_MODE=ci EXPECTED_COMMIT="$RELEASE_COMMIT"
 
       # Siehe .github/workflows/ci.yml für denselben Schritt — Runner-Disk
@@ -151,63 +117,29 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-      # PACKAGE_DIR wird explizit auf den Pfad gesetzt, den
-      # package-production (PRODUCTION_HEADLESS_PACKAGE_DIR, Makefile-
-      # Default) als Quelle erwartet. BASE_URL ist die bestätigte
-      # Hetzner-Objektbasis (publish_s3.TARGETS["hetzner"]); die
-      # tatsächlichen Image-/Icon-URLs im finalen Manifest werden erst in
-      # publish_production_manifests() mit der versionierten
-      # Release-URL überschrieben (identisches Verhalten wie bei Gate-2/3-
-      # Testpaketen).
+      # Paketierungs-BASE_URL bleibt eine versionierte GitHub-Release-Asset-
+      # URL, damit auch das Ausgangsmanifest kein S3-Ziel enthält. Der
+      # Release-Adapter rendert das Manifestasset frisch mit derselben Basis.
       - name: Paketieren (Status production, Version aus dem annotierten Tag)
         run: |
           make package VARIANT=headless \
             PACKAGE_DIR=package/headless-production \
-            BASE_URL=https://hel1.your-objectstorage.com/ros-pi-gen-images
+            BASE_URL=https://github.com/kraeml/ros-pi-gen/releases/download/${RELEASE_TAG}/
 
       - name: Produktions-Release-Paket zusammenführen
         run: make package-production
 
-      - name: AWS-CLI-Profil hetzner-prod aus Secrets konfigurieren
-        env:
-          HETZNER_ACCESS_KEY_ID: ${{ secrets.HETZNER_ACCESS_KEY_ID }}
-          HETZNER_SECRET_ACCESS_KEY: ${{ secrets.HETZNER_SECRET_ACCESS_KEY }}
-        run: |
-          aws configure set aws_access_key_id "$HETZNER_ACCESS_KEY_ID" --profile hetzner-prod
-          aws configure set aws_secret_access_key "$HETZNER_SECRET_ACCESS_KEY" --profile hetzner-prod
-          aws configure set region hel1 --profile hetzner-prod
+      - name: Wiederverwendung unmittelbar vor GitHub-Publish ausschließen
+        run: make release-preflight TAG="$RELEASE_TAG" PREFLIGHT_MODE=ci
 
-      - name: GitHub-Wiederverwendung unmittelbar vor S3-Schreibzugriff ausschließen
-        run: make release-preflight TAG="$RELEASE_TAG" PREFLIGHT_MODE=ci GITHUB_ONLY=1
-
-      - name: Diagnose vor S3-Upload
+      - name: Diagnose vor GitHub-Draft
         run: |
-          echo "== Diagnose VOR Upload-Schritt =="
-          aws --version
           df -h / /tmp "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
           df -i /tmp
           du -sh package/headless-release-production 2>/dev/null || true
           ls -la package/headless-release-production 2>/dev/null || true
 
-      # Schritt 1/5 (siehe Kopfkommentar): Image + Icon zuerst.
-      - name: "S3 (1/2): Produktions-Image + Icon veröffentlichen"
-        id: upload
-        env:
-          ROS_PI_GEN_PRODUCTION_WRITE_APPROVED: "yes"
-        run: make publish-s3-production-image
-
-      - name: Diagnose nach S3-Upload-Schritt
-        if: always()
-        run: |
-          echo "== Diagnose NACH Upload-Schritt (Status: ${{ steps.upload.outcome }}) =="
-          aws --version
-          df -h / /tmp "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
-          df -i /tmp
-          du -sh package/headless-release-production 2>/dev/null || true
-          ls -la package/headless-release-production 2>/dev/null || true
-
-      # Schritt 2/5: Draft mit allen vier Assets, nur authentifiziert
-      # geprüft (siehe tools/github_release.py).
+      # Draft-Assets nur authentifiziert prüfen (siehe tools/github_release.py).
       - name: GitHub-Draft-Release mit allen Assets erstellen
         run: .venv/bin/python tools/github_release.py create-draft package/headless-release-production
 
@@ -217,20 +149,13 @@ jobs:
           .venv/bin/python tools/github_release.py verify-draft "${{ github.ref_name }}" \
             "$IMAGE_NAME" headless-os-list.json SHA256SUMS roboter-os.svg
 
-      # Schritt 3/5: erst jetzt die S3-Manifeste (versioniert, dann
-      # stabil) aktualisieren -- setzt den erfolgreichen Image-Upload aus
-      # Schritt 1 voraus (publish_production_manifests() prüft dies).
-      - name: "S3 (2/2): versioniertes + stabiles Manifest veröffentlichen"
-        env:
-          ROS_PI_GEN_PRODUCTION_WRITE_APPROVED: "yes"
-        run: make publish-s3-production-manifests
-
-      # Schritt 4/5: erst nach erfolgreichem S3-Update veröffentlichen.
       - name: GitHub-Release veröffentlichen und als latest markieren
         run: .venv/bin/python tools/github_release.py publish "${{ github.ref_name }}"
 
-      # Schritt 5/5: anonyme Redirect-/Zugriffsprüfung nach Veröffentlichung.
-      - name: Anonymen Zugriff auf das veröffentlichte Image prüfen
+      - name: Versionierte Assets und stabilen Imager-Einstieg anonym prüfen
         run: |
           IMAGE_NAME=$(basename package/headless-release-production/*.img.xz)
           .venv/bin/python tools/github_release.py check-public-asset "${{ github.ref_name }}" "$IMAGE_NAME"
+          .venv/bin/python tools/github_release.py check-public-asset "${{ github.ref_name }}" headless-os-list.json
+          .venv/bin/python tools/github_release.py check-public-asset "${{ github.ref_name }}" roboter-os.svg
+          .venv/bin/python tools/github_release.py check-public-url https://github.com/kraeml/ros-pi-gen/releases/latest/download/headless-os-list.json

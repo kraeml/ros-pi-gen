@@ -49,9 +49,8 @@ def test_candidate_preflight_skips_checkout_tag_validation(monkeypatch):
     )
     monkeypatch.setattr(release_preflight, "ensure_local_tag_not_pushed", lambda tag, remote: calls.append("remote"))
     monkeypatch.setattr(release_preflight, "ensure_github_release_absent", lambda tag: calls.append("github"))
-    monkeypatch.setattr(release_preflight, "ensure_s3_version_absent", lambda version: calls.append("s3"))
     release_preflight.run_preflight("image-2026.10.4", mode="local", candidate=True)
-    assert calls == ["remote", "github", "s3"]
+    assert calls == ["remote", "github"]
 
 
 def test_candidate_preflight_rejects_invalid_tag_components():
@@ -142,39 +141,18 @@ def test_github_check_accepts_empty_release_list(monkeypatch):
     release_preflight.ensure_github_release_absent("image-2026.10.4")
 
 
-def test_s3_check_rejects_existing_version_objects(monkeypatch):
-    monkeypatch.setattr(
-        release_preflight.publish_s3,
-        "list_version_objects",
-        lambda profile, endpoint, region, prefix: [prefix + "image.img.xz"],
-    )
-    with pytest.raises(release_preflight.PreflightError, match="bereits belegt"):
-        release_preflight.ensure_s3_version_absent("2026.10.4")
-
-
-def test_s3_check_fails_closed_on_list_failure(monkeypatch):
-    def fail(*args):
-        raise release_preflight.publish_s3.PublishError("AccessDenied")
-
-    monkeypatch.setattr(release_preflight.publish_s3, "list_version_objects", fail)
-    with pytest.raises(release_preflight.PreflightError, match="nicht sicher geprüft"):
-        release_preflight.ensure_s3_version_absent("2026.10.4")
-
-
-def test_local_preflight_checks_all_targets_in_order(monkeypatch):
+def test_local_preflight_checks_tag_and_github_only(monkeypatch):
     calls = []
     monkeypatch.setattr(release_preflight, "validate_tag", lambda tag, expected_commit: calls.append("tag"))
     monkeypatch.setattr(release_preflight, "ensure_local_tag_not_pushed", lambda tag, remote: calls.append("remote"))
     monkeypatch.setattr(release_preflight, "ensure_github_release_absent", lambda tag: calls.append("github"))
-    monkeypatch.setattr(release_preflight, "ensure_s3_version_absent", lambda version: calls.append("s3"))
     release_preflight.run_preflight("image-2026.10.4", mode="local")
-    assert calls == ["tag", "remote", "github", "s3"]
+    assert calls == ["tag", "remote", "github"]
 
 
-def test_ci_preflight_can_repeat_github_check_before_s3_upload(monkeypatch):
+def test_ci_preflight_checks_tag_and_github_only(monkeypatch):
     calls = []
     monkeypatch.setattr(release_preflight, "validate_tag", lambda tag, expected_commit: calls.append("tag"))
     monkeypatch.setattr(release_preflight, "ensure_github_release_absent", lambda tag: calls.append("github"))
-    monkeypatch.setattr(release_preflight, "ensure_s3_version_absent", lambda version: calls.append("s3"))
-    release_preflight.run_preflight("image-2026.10.4", mode="ci", github_only=True)
+    release_preflight.run_preflight("image-2026.10.4", mode="ci")
     assert calls == ["tag", "github"]

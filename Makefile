@@ -53,9 +53,8 @@ BASE_URL ?=
 PACKAGE_DIR ?= $(REPO_ROOT)/package/$(VARIANT)
 HEADLESS_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-test
 RELEASE_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-release-test
-# Produktions-Pendants (Etappe 4, Headless-only-Übergangsregelung,
-# AGENTS.md): dieselbe generische Merge-Logik wie package-release, aber mit
-# einem Paket, das ohne -test-Tag/-Suffix gebaut wurde (Status production).
+# Produktionspaket (Headless-only-Übergangsregelung, AGENTS.md): dasselbe
+# Paketlayout wie bei package-release, aber mit Status production.
 PRODUCTION_HEADLESS_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-production
 PRODUCTION_RELEASE_PACKAGE_DIR ?= $(REPO_ROOT)/package/headless-release-production
 # S3_TARGET waehlt die Zieldefaults in tools/publish-s3.sh (omv|hetzner);
@@ -71,7 +70,6 @@ DRY_RUN ?= 0
 REMOTE ?= origin
 PREFLIGHT_MODE ?= local
 EXPECTED_COMMIT ?=
-GITHUB_ONLY ?= 0
 # Iteration: Export überspringen (siehe README, „schnelle Iteration")
 SKIP_IMAGES_BUILD ?=
 
@@ -115,7 +113,7 @@ SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/nul
                $(STAGE_DIR)/10-doitpi-firstboot/files/doitpi_firstboot.sh
 
 .DEFAULT_GOAL := help
-.PHONY: help venv lint setup build test ensure-nft-helper package package-release package-production publish-s3-test publish-s3-test-read-only-check publish-s3-production publish-s3-production-image publish-s3-production-manifests release-preflight release-version release clean-release-stage ci clean-container clean-work clean-variant-skips
+.PHONY: help venv lint setup build test ensure-nft-helper package package-release package-production publish-s3-test publish-s3-test-read-only-check release-preflight release-version release clean-release-stage ci clean-container clean-work clean-variant-skips
 .PHONY: binfmt-setup binfmt-cleanup apply-variant
 .PHONY: guard-vagrant vm-up vm-ssh vm-status vm-bootstrap vm-sync vm-build vm-test
 .PHONY: vm-artifacts vm-halt vm-destroy vm-ci
@@ -137,9 +135,6 @@ help:
 	@echo "  make package-production       Headless-only-Produktionspaket vorbereiten (Status production, kein -test-Tag)"
 	@echo "  make publish-s3-test S3_TARGET=omv|hetzner   Testpaket nach ros-pi-gen-test/ publizieren (nur nach Freigaben; Default omv)"
 	@echo "  make publish-s3-test-read-only-check S3_TARGET=omv|hetzner   Nur Lesezugriff pruefen, kein Upload"
-	@echo "  make publish-s3-production    Headless-only-Produktionspaket nach ros-pi-gen/ auf Hetzner (nur nach ROS_PI_GEN_PRODUCTION_WRITE_APPROVED=yes)"
-	@echo "  make publish-s3-production-image      Nur Image+Icon veröffentlichen (Release-Workflow-Schritt vor GitHub-Draft)"
-	@echo "  make publish-s3-production-manifests  Nur S3-Manifeste veröffentlichen (Release-Workflow-Schritt nach GitHub-Draft)"
 	@echo "  make release-version         Nächste freie lokale/Remote-CalVer-Version vorschlagen (UTC)"
 	@echo "  make release [TAG=image-YYYY.MM.PATCH]  Preflight, Gate-4-Bestätigung, annotierter Tag und Einzel-Tag-Push"
 	@echo "  make release-preflight TAG=image-YYYY.MM.PATCH  Read-only Freigabe-/Wiederverwendungsprüfung"
@@ -284,29 +279,6 @@ publish-s3-test-read-only-check: venv
 	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
 	  $(REPO_ROOT)/tools/publish-s3.sh --read-only-check --target $(S3_TARGET)
 
-# Produktions-Publish ist bewusst strikt auf --target hetzner verdrahtet
-# (kein S3_TARGET-Durchgriff): publish_s3.publish_production_package()
-# lehnt jedes andere Ziel bereits intern ab; das Target hier macht diese
-# Beschränkung zusätzlich auf Make-Ebene sichtbar und verhindert ein
-# versehentliches S3_TARGET=omv bei einem Produktions-Aufruf. Erfordert
-# zusätzlich ROS_PI_GEN_PRODUCTION_WRITE_APPROVED=yes (siehe tools/publish_s3.py).
-publish-s3-production: venv
-	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
-	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner $(if $(filter 1,$(DRY_RUN)),--dry-run,)
-
-# Getrennte Produktions-Publish-Schritte (Etappe 4, AGENTS.md-Reihenfolge):
-# der Release-Workflow ruft zuerst publish-s3-production-image, dann den
-# GitHub-Draft-Schritt, dann publish-s3-production-manifests, dann die
-# GitHub-Veröffentlichung -- niemals den kombinierten Alias
-# publish-s3-production (der bleibt für isolierte lokale Tests nützlich).
-publish-s3-production-image: venv
-	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
-	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner --production-step image $(if $(filter 1,$(DRY_RUN)),--dry-run,)
-
-publish-s3-production-manifests: venv
-	@S3_PROFILE='$(S3_PROFILE)' S3_ENDPOINT='$(S3_ENDPOINT)' S3_REGION='$(S3_REGION)' S3_PUBLIC_BASE_URL='$(S3_PUBLIC_BASE_URL)' \
-	  $(REPO_ROOT)/tools/publish-s3.sh "$(PRODUCTION_RELEASE_PACKAGE_DIR)" --target hetzner --production-step manifests $(if $(filter 1,$(DRY_RUN)),--dry-run,)
-
 release-version:
 	@python3 $(REPO_ROOT)/tools/release_preflight.py --suggest-version --remote "$(REMOTE)"
 
@@ -320,7 +292,6 @@ release-preflight: export RELEASE_PREFLIGHT_TAG = $(TAG)
 release-preflight: export RELEASE_PREFLIGHT_MODE = $(PREFLIGHT_MODE)
 release-preflight: export RELEASE_PREFLIGHT_REMOTE = $(REMOTE)
 release-preflight: export RELEASE_PREFLIGHT_COMMIT = $(EXPECTED_COMMIT)
-release-preflight: export RELEASE_PREFLIGHT_GITHUB_ONLY = $(GITHUB_ONLY)
 release-preflight: venv
 	@tag="$$RELEASE_PREFLIGHT_TAG"; \
 	  candidate=0; \
@@ -332,7 +303,6 @@ release-preflight: venv
 	  args=(--tag "$$tag" --mode "$$RELEASE_PREFLIGHT_MODE" --remote "$$RELEASE_PREFLIGHT_REMOTE"); \
 	  if [ "$$candidate" = "1" ]; then args+=(--candidate); fi; \
 	  if [ -n "$$RELEASE_PREFLIGHT_COMMIT" ]; then args+=(--expected-commit "$$RELEASE_PREFLIGHT_COMMIT"); fi; \
-	  if [ "$$RELEASE_PREFLIGHT_GITHUB_ONLY" = "1" ]; then args+=(--github-only); fi; \
 	  $(VENV)/bin/python $(REPO_ROOT)/tools/release_preflight.py "$${args[@]}"
 
 # --- ci (Pipeline-Kette; Stufen wie GitHub-Image-Workflow.md, § 3) ----------

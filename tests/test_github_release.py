@@ -38,13 +38,13 @@ def make_production_package(directory: Path, version: str = "2026.09.9") -> dict
     (directory / "SHA256SUMS").write_text(package_image.render_sha256sums({image_name: digest}))
     (directory / "roboter-os.svg").write_bytes((ROOT / "assets/roboter-os.svg").read_bytes())
     manifest = package_image.render_manifest(
-        metadata, "https://hel1.your-objectstorage.com/ros-pi-gen-images/ros-pi-gen/releases/" + version + "/"
+        metadata, f"https://github.com/{github_release.REPO}/releases/download/image-{version}/"
     )
     (directory / "os-list.json").write_text(json.dumps(manifest, indent=2))
     return metadata
 
 
-def test_load_production_metadata_delegates_to_publish_s3_validation(tmp_path):
+def test_load_production_metadata_validates_without_s3(tmp_path):
     package = tmp_path / "release"
     expected = make_production_package(package)
     metadata = github_release.load_production_metadata(package)
@@ -60,7 +60,7 @@ def test_load_production_metadata_rejects_test_status(tmp_path, monkeypatch):
         github_release.load_production_metadata(package)
 
 
-def test_github_asset_paths_renders_manifest_if_missing(tmp_path):
+def test_github_asset_paths_renders_github_manifest(tmp_path):
     package = tmp_path / "release"
     metadata = make_production_package(package)
     assert not (package / "headless-os-list.json").exists()
@@ -78,14 +78,8 @@ def test_github_asset_paths_renders_manifest_if_missing(tmp_path):
 
 
 def test_github_asset_paths_never_writes_into_package_dir(tmp_path):
-    """Regressionstest für die AGENTS.md-Reihenfolge (Etappe 4): der
-    GitHub-Draft-Schritt darf das S3-Produktionspaketverzeichnis nicht
-    verändern, da publish_s3.validate_production_package() danach exakt
-    denselben, ursprünglichen Dateisatz für den nachfolgenden
-    Manifest-Publish-Schritt erwartet. Würde github_asset_paths() das neu
-    gerenderte headless-os-list.json nach package_dir schreiben, schlägt
-    validate_production_package() wegen einer unerwarteten Zusatzdatei
-    fehl."""
+    """Der GitHub-Draft-Schritt rendert das finale Manifest außerhalb des
+    geprüften Produktionspakets."""
     package = tmp_path / "release"
     metadata = make_production_package(package)
     files_before = sorted(p.name for p in package.iterdir())
@@ -93,22 +87,16 @@ def test_github_asset_paths_never_writes_into_package_dir(tmp_path):
     files_after = sorted(p.name for p in package.iterdir())
     assert files_after == files_before
 
-    sys.path.insert(0, str(ROOT / "tools"))
-    import publish_s3
-
-    # validate_production_package() muss nach dem GitHub-Draft-Schritt
-    # weiterhin unverändert erfolgreich sein (derselbe Dateisatz).
-    assert publish_s3.validate_production_package(package) == metadata
+    assert github_release.load_production_metadata(package) == metadata
 
 
-def test_github_asset_paths_reuses_existing_manifest(tmp_path):
+def test_github_asset_paths_uses_fresh_github_manifest(tmp_path):
     package = tmp_path / "release"
     metadata = make_production_package(package)
     manifest_path = package / "headless-os-list.json"
     manifest_path.write_text(json.dumps({"os_list": [{"sentinel": True}]}))
     paths = github_release.github_asset_paths(package, metadata)
-    # Nicht überschrieben, da bereits vorhanden.
-    assert json.loads(paths["manifest"].read_text())["os_list"][0].get("sentinel") is True
+    assert json.loads(paths["manifest"].read_text())["os_list"][0].get("sentinel") is None
 
 
 def test_github_asset_paths_requires_image_file(tmp_path):
@@ -257,6 +245,26 @@ def test_check_public_asset_uses_curl_with_redirect_follow(monkeypatch):
         f"https://github.com/{github_release.REPO}/releases/download/"
         "image-2026.09.9/roboter-os-2026.09.9-headless.img.xz"
     )
+
+
+def test_github_latest_manifest_url_is_stable_entrypoint():
+    assert github_release.github_latest_manifest_url("headless") == (
+        f"https://github.com/{github_release.REPO}/releases/latest/download/headless-os-list.json"
+    )
+
+
+def test_check_public_url_uses_redirect_follow(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return github_release.subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(github_release.subprocess, "run", fake_run)
+    url = github_release.github_latest_manifest_url("headless")
+    github_release.check_public_url(url)
+    assert captured["command"][-1] == url
+    assert "--location" in captured["command"]
 
 
 def test_check_public_asset_raises_on_curl_failure(monkeypatch):
