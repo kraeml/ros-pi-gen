@@ -78,19 +78,38 @@ class PublishError(RuntimeError):
 
 
 class AwsCliError(PublishError):
-    def __init__(self, operation: str, exit_code: int, error_class: str, http_status: int | None, stdout_length: int, stderr_length: int):
+    def __init__(
+        self,
+        operation: str,
+        exit_code: int,
+        error_class: str,
+        http_status: int | None,
+        stdout_length: int,
+        stderr_length: int,
+        stderr_lines: int,
+        stderr_upload_failed_prefix: bool,
+        failure_hint: str,
+    ):
         self.operation = operation
         self.exit_code = exit_code
         self.error_class = error_class
         self.http_status = http_status
         self.stdout_length = stdout_length
         self.stderr_length = stderr_length
+        self.stderr_lines = stderr_lines
+        self.stderr_upload_failed_prefix = stderr_upload_failed_prefix
+        self.failure_hint = failure_hint
         details = (
             f"AWS CLI fehlgeschlagen: operation={operation}; exit_code={exit_code}; "
-            f"error_class={error_class}; http_status={http_status if http_status is not None else 'none'}"
+            f"error_class={error_class}; http_status={http_status if http_status is not None else 'none'}; "
+            f"failure_hint={failure_hint}"
         )
         if error_class == "unknown":
-            details += f"; stdout_length={stdout_length}; stderr_length={stderr_length}"
+            details += (
+                f"; stdout_length={stdout_length}; stderr_length={stderr_length}; "
+                f"stderr_lines={stderr_lines}; "
+                f"stderr_upload_failed_prefix={str(stderr_upload_failed_prefix).lower()}"
+            )
         super().__init__(details)
 
 
@@ -109,20 +128,36 @@ def resolve_target(profile: str, endpoint: str, region: str) -> dict:
     )
 
 
-def classify_aws_failure(exit_code: int, stdout: str, stderr: str) -> tuple[str, int | None]:
+def classify_aws_failure(
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+) -> tuple[str, int | None, str]:
     diagnostic = f"{stdout}\n{stderr}"
     status_match = re.search(r"An error occurred\s+\((\d{3})\)", diagnostic, re.IGNORECASE)
     http_status = int(status_match.group(1)) if status_match else None
     markers = diagnostic.lower()
     if http_status == 403 or any(marker in markers for marker in ("accessdenied", "invalidaccesskeyid", "signaturedoesnotmatch")):
-        return "access_denied", http_status
+        return "access_denied", http_status, "aws_access_denied"
     if http_status == 404 or any(marker in markers for marker in ("nosuchkey", "nosuchbucket")):
-        return "not_found", http_status
+        return "not_found", http_status, "aws_object_or_bucket_not_found"
     if any(marker in markers for marker in ("timed out", "readtimeout")):
-        return "timeout", http_status
+        return "timeout", http_status, "network_timeout"
     if any(marker in markers for marker in ("could not connect", "endpointconnectionerror", "name or service not known")):
-        return "connect", http_status
-    return "unknown", http_status
+        return "connect", http_status, "network_connection_failed"
+    if "traceback (most recent call last)" in markers:
+        return "unknown", http_status, "cli_runtime_exception"
+    if "could not read source file" in markers or "unable to open file" in markers:
+        return "unknown", http_status, "source_file_unreadable"
+    if "no space left on device" in markers or "[errno 28]" in markers:
+        return "unknown", http_status, "local_storage_full"
+    if any(marker in markers for marker in ("checksumalgorithm", "x-amz-checksum")):
+        return "unknown", http_status, "checksum_compatibility_error"
+    if any(marker in markers for marker in ("multipartupload", "create multipart upload", "complete multipart upload")):
+        return "unknown", http_status, "multipart_upload_error"
+    if "fatal error:" in markers:
+        return "unknown", http_status, "cli_fatal_error"
+    return "unknown", http_status, "unclassified"
 
 
 def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_failure: bool = False) -> subprocess.CompletedProcess:
@@ -141,13 +176,19 @@ def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_
     if result.returncode == 0:
         print(f"AWS CLI Ergebnis: operation={operation}; exit_code=0")
         return result
-    error_class, http_status = classify_aws_failure(result.returncode, result.stdout, result.stderr)
+    error_class, http_status, failure_hint = classify_aws_failure(
+        result.returncode, result.stdout, result.stderr
+    )
     status = http_status if http_status is not None else "none"
+    stderr_lines = len(result.stderr.splitlines())
+    stderr_upload_failed_prefix = bool(re.search(r"(?im)^upload failed:", result.stderr))
     print(
         f"AWS CLI Ergebnis: operation={operation}; exit_code={result.returncode}; "
-        f"error_class={error_class}; http_status={status}"
+        f"error_class={error_class}; http_status={status}; failure_hint={failure_hint}"
         + (
-            f"; stdout_length={len(result.stdout)}; stderr_length={len(result.stderr)}"
+            f"; stdout_length={len(result.stdout)}; stderr_length={len(result.stderr)}; "
+            f"stderr_lines={stderr_lines}; "
+            f"stderr_upload_failed_prefix={str(stderr_upload_failed_prefix).lower()}"
             if error_class == "unknown" else ""
         )
     )
@@ -162,6 +203,9 @@ def run_aws(args: list[str], profile: str, endpoint: str, region: str, *, allow_
             http_status,
             len(result.stdout),
             len(result.stderr),
+            stderr_lines,
+            stderr_upload_failed_prefix,
+            failure_hint,
         )
     return result
 
@@ -191,10 +235,16 @@ def verify_uploaded_object(
         if error.error_class == "not_found":
             raise PublishError(f"S3-Upload-Existenzprüfung fehlgeschlagen: Objekt nicht vorhanden: {key}") from error
         status = error.http_status if error.http_status is not None else "none"
-        raise PublishError(
+        message = (
             f"S3-Upload-Existenzprüfung fehlgeschlagen für {key}: "
-            f"error_class={error.error_class}; http_status={status}"
-        ) from error
+            f"error_class={error.error_class}; http_status={status}; failure_hint={error.failure_hint}"
+        )
+        if error.error_class == "unknown":
+            message += (
+                f"; stderr_lines={error.stderr_lines}; "
+                f"stderr_upload_failed_prefix={str(error.stderr_upload_failed_prefix).lower()}"
+            )
+        raise PublishError(message) from error
     except PublishError as error:
         raise PublishError(f"S3-Upload-Existenzprüfung fehlgeschlagen für {key}") from error
     try:
@@ -450,13 +500,15 @@ def list_version_objects(profile: str, endpoint: str, region: str, prefix: str) 
         allow_failure=True,
     )
     if response.returncode:
-        error_class, http_status = classify_aws_failure(response.returncode, response.stdout, response.stderr)
+        error_class, http_status, failure_hint = classify_aws_failure(
+            response.returncode, response.stdout, response.stderr
+        )
         if error_class == "not_found":
             raise PublishError(f"Bucket {BUCKET} fehlt oder ist nicht erreichbar; Anlage ist nicht Teil des Publishers")
         status = http_status if http_status is not None else "none"
         raise PublishError(
             f"Version kann nicht sicher auf Wiederverwendung geprüft werden: "
-            f"error_class={error_class}; http_status={status}"
+            f"error_class={error_class}; http_status={status}; failure_hint={failure_hint}"
         )
     try:
         result = json.loads(response.stdout)

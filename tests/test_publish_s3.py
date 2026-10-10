@@ -530,20 +530,43 @@ def test_aws_cli_uses_minio_checksum_compatibility_settings(monkeypatch):
 @pytest.mark.parametrize(
     ("exit_code", "stdout", "stderr", "expected"),
     [
-        (1, "An error occurred (404) when calling HeadObject: NoSuchKey", "", ("not_found", 404)),
-        (1, "An error occurred (403) when calling PutObject: AccessDenied", "", ("access_denied", 403)),
-        (1, "Provider text says (404), but no AWS error wrapper", "", ("unknown", None)),
-        (1, "NoSuchBucket", "", ("not_found", None)),
-        (1, "NoSuchKey", "", ("not_found", None)),
-        (1, "Profile not found", "", ("unknown", None)),
-        (1, "command not found", "", ("unknown", None)),
-        (1, "", "ReadTimeout: request timed out", ("timeout", None)),
-        (1, "", "EndpointConnectionError: Could not connect", ("connect", None)),
-        (1, "opaque provider detail", "", ("unknown", None)),
+        (1, "An error occurred (404) when calling HeadObject: NoSuchKey", "", ("not_found", 404, "aws_object_or_bucket_not_found")),
+        (1, "An error occurred (403) when calling PutObject: AccessDenied", "", ("access_denied", 403, "aws_access_denied")),
+        (1, "Provider text says (404), but no AWS error wrapper", "", ("unknown", None, "unclassified")),
+        (1, "NoSuchBucket", "", ("not_found", None, "aws_object_or_bucket_not_found")),
+        (1, "NoSuchKey", "", ("not_found", None, "aws_object_or_bucket_not_found")),
+        (1, "Profile not found", "", ("unknown", None, "unclassified")),
+        (1, "command not found", "", ("unknown", None, "unclassified")),
+        (1, "", "ReadTimeout: request timed out", ("timeout", None, "network_timeout")),
+        (1, "", "EndpointConnectionError: Could not connect", ("connect", None, "network_connection_failed")),
+        (1, "opaque provider detail", "", ("unknown", None, "unclassified")),
+        (1, "", "Could not read source file", ("unknown", None, "source_file_unreadable")),
+        (1, "", "Unable to open file", ("unknown", None, "source_file_unreadable")),
+        (1, "", "OSError: [Errno 28] No space left on device", ("unknown", None, "local_storage_full")),
+        (1, "", "OSError: [Errno 281] simulated failure", ("unknown", None, "unclassified")),
+        (1, "", "Invalid checksum header", ("unknown", None, "unclassified")),
+        (1, "", "x-amz-checksum-algorithm rejected", ("unknown", None, "checksum_compatibility_error")),
+        (1, "", "CompleteMultipartUpload failed", ("unknown", None, "multipart_upload_error")),
+        (1, "", "Part 3 of multipart upload timed out", ("timeout", None, "network_timeout")),
+        (1, "", "Traceback (most recent call last): checksum multipart failure", ("unknown", None, "cli_runtime_exception")),
+        (1, "", "fatal error: generic failure", ("unknown", None, "cli_fatal_error")),
+        (1, "fatal error: An error occurred (404): NoSuchKey", "", ("not_found", 404, "aws_object_or_bucket_not_found")),
     ],
 )
 def test_classify_aws_failure(exit_code, stdout, stderr, expected):
     assert publish_s3.classify_aws_failure(exit_code, stdout, stderr) == expected
+
+
+def test_access_denied_classification_precedes_not_found():
+    assert publish_s3.classify_aws_failure(
+        1, "An error occurred (404): AccessDenied NoSuchKey", ""
+    ) == ("access_denied", 404, "aws_access_denied")
+
+
+def test_traceback_hint_precedes_checksum_and_multipart_markers():
+    assert publish_s3.classify_aws_failure(
+        1, "", "Traceback (most recent call last): checksum multipart failure"
+    ) == ("unknown", None, "cli_runtime_exception")
 
 
 @pytest.mark.parametrize("exit_code", [0, 1])
@@ -579,8 +602,11 @@ def test_aws_cli_unknown_failure_logs_only_output_lengths(monkeypatch, capsys):
         publish_s3.run_aws(["s3", "cp", "source", "destination"], "hetzner-prod", "https://example.invalid", "hel1")
     output = capsys.readouterr().out
     assert "error_class=unknown" in output
+    assert "failure_hint=unclassified" in output
     assert "stdout_length=6" in output
     assert "stderr_length=14" in output
+    assert "stderr_lines=1" in output
+    assert "stderr_upload_failed_prefix=false" in output
     assert "opaque" not in output
     assert "unknown detail" not in output
     assert "opaque" not in str(error.value)
@@ -589,7 +615,11 @@ def test_aws_cli_unknown_failure_logs_only_output_lengths(monkeypatch, capsys):
 
 @pytest.mark.parametrize("marker", ["NoSuchBucket", "NoSuchKey"])
 def test_not_found_markers_without_http_wrapper_are_classified(marker):
-    assert publish_s3.classify_aws_failure(1, marker, "") == ("not_found", None)
+    assert publish_s3.classify_aws_failure(1, marker, "") == (
+        "not_found",
+        None,
+        "aws_object_or_bucket_not_found",
+    )
 
 
 def test_list_version_objects_maps_nosuchbucket_to_bucket_error(monkeypatch):
@@ -611,7 +641,9 @@ def test_list_version_objects_maps_nosuchbucket_to_bucket_error(monkeypatch):
 
 def test_head_object_verification_reports_missing_object_separately(monkeypatch, capsys):
     def fake_run_aws(args, *a, **k):
-        raise publish_s3.AwsCliError("s3api head-object", 1, "not_found", 404, 0, 0)
+        raise publish_s3.AwsCliError(
+            "s3api head-object", 1, "not_found", 404, 0, 0, 0, False, "aws_object_or_bucket_not_found"
+        )
 
     monkeypatch.setattr(publish_s3, "run_aws", fake_run_aws)
     with pytest.raises(publish_s3.PublishError, match="Objekt nicht vorhanden"):
@@ -625,12 +657,21 @@ def test_head_object_verification_reports_missing_object_separately(monkeypatch,
     assert "Existenzprüfung" in capsys.readouterr().out
 
 
-def test_head_object_cli_not_found_is_not_reported_as_missing_object(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("stderr", "failure_hint"),
+    [
+        ("Could not read source file", "source_file_unreadable"),
+        ("OSError: [Errno 28] No space left on device", "local_storage_full"),
+        ("x-amz-checksum-algorithm rejected", "checksum_compatibility_error"),
+        ("CompleteMultipartUpload failed", "multipart_upload_error"),
+    ],
+)
+def test_head_object_unexpected_failures_use_safe_hint(monkeypatch, capsys, stderr, failure_hint):
     def fake_run(command, **kwargs):
-        return publish_s3.subprocess.CompletedProcess(command, 1, "command not found", "")
+        return publish_s3.subprocess.CompletedProcess(command, 1, "", stderr)
 
     monkeypatch.setattr(publish_s3.subprocess, "run", fake_run)
-    with pytest.raises(publish_s3.PublishError, match="error_class=unknown") as error:
+    with pytest.raises(publish_s3.PublishError, match=f"failure_hint={failure_hint}") as error:
         publish_s3.verify_uploaded_object(
             "ros-pi-gen/releases/2026.09.1/roboter-os-2026.09.1-headless.img.xz",
             12,
@@ -641,6 +682,10 @@ def test_head_object_cli_not_found_is_not_reported_as_missing_object(monkeypatch
     output = capsys.readouterr().out + str(error.value)
     assert "Objekt nicht vorhanden" not in output
     assert "command not found" not in output
+    assert f"failure_hint={failure_hint}" in output
+    assert stderr not in output
+    assert "stderr_lines=1" in output
+    assert "stderr_upload_failed_prefix=false" in output
 
 
 def test_head_object_verification_checks_size(monkeypatch):
