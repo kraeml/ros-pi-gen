@@ -7,7 +7,7 @@
 NODERED_VERSION="5.0.8"     # Platzhalter; echte Version vorher mit
                             # "npm view node-red dist-tags" nachsehen
 INSTALLER_REF="master"      # besser: Tag oder Commit-Hash für reproduzierbare Builds
-INSTALLER_URL="https://raw.githubusercontent.com/node-red/linux-installers/${INSTALLER_REF}/deb/update-nodejs-and-nodered"
+INSTALLER_URL="https://github.com/node-red/linux-installers/releases/latest/download/install-update-nodered-deb"
 
 # --- Installation -------------------------------------------------------------
 # Heredoc ohne Quotes: pi-gen löst ${...} auf, bevor der Text ins Chroot geht.
