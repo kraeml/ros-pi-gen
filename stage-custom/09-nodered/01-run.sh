@@ -1,42 +1,38 @@
 #!/bin/bash -e
 
-# Pins: vor dem Build anpassen
-NODERED_VERSION="5.0.8"     # Platzhalter, aktuelle Version selbst eintragen
+NODERED_VERSION="5.0.8"     # Platzhalter, vor dem Build prüfen
 INSTALLER_REF="master"      # besser: Tag oder Commit-Hash
 INSTALLER_URL="https://raw.githubusercontent.com/node-red/linux-installers/${INSTALLER_REF}/deb/update-nodejs-and-nodered"
 
+# Installer als Benutzer ausführen; Variablen explizit durchreichen
 on_chroot << EOF
 set -e
-su - "${FIRST_USER_NAME}" -c '
+runuser -u "${FIRST_USER_NAME}" -- bash -c '
+  set -e
   curl -fsSL "${INSTALLER_URL}" -o /tmp/nodered-installer.sh
-  bash /tmp/nodered-installer.sh \
-    --confirm-root \
-    --confirm-install \
-    --node24 \
-    --nodered-version="${NODERED_VERSION}" \
-    --confirm-pi \
-    --nodered-user="${FIRST_USER_NAME}" \
+  bash /tmp/nodered-installer.sh \\
+    --confirm-root \\
+    --confirm-install \\
+    --node24 \\
+    --nodered-version="${NODERED_VERSION}" \\
+    --confirm-pi \\
+    --nodered-user="${FIRST_USER_NAME}" \\
     --no-init
   rm -f /tmp/nodered-installer.sh
 '
 EOF
 
-# Versionen festhalten
-on_chroot << 'EOF'
+# Versionen festhalten (Variable wird hier von pi-gen aufgelöst)
+on_chroot << EOF
 {
-  echo "node: $(node --version)"
-  echo "npm: $(npm --version)"
-  echo "node-red: $(su - "${FIRST_USER_NAME}" -c 'node-red --version 2>/dev/null | head -n1')"
+  echo "node: \$(node --version)"
+  echo "npm: \$(npm --version)"
+  echo "node-red: \$(runuser -u "${FIRST_USER_NAME}" -- node-red --version 2>/dev/null | head -n1)"
 } > /etc/nodered-build-versions
 EOF
 
-install -d "${ROOTFS_DIR}/etc/systemd/system/nodered.service.d"
-cat > "${ROOTFS_DIR}/etc/systemd/system/nodered.service.d/override.conf" <<'EOF'
-[Service]
-User=pi
-Group=pi
-WorkingDirectory=/home/pi
-EOF
+install -D -m 644 files/nodered-override.conf \
+  "${ROOTFS_DIR}/etc/systemd/system/nodered.service.d/override.conf"
 
 on_chroot << 'EOF'
 systemctl enable nodered.service
