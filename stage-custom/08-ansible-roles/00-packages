@@ -16,6 +16,10 @@ vim
 # --- Terminal- & Sitzungsverwaltung ---
 screen
 tmux
+tree
+bash-completion
+
 # --- Diagnose- & Netzwerk-Tools ---
 inxi
 nmap
+htop
