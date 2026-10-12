@@ -64,6 +64,7 @@ Die konkrete URL muss vom Imager-Rechner erreichbar sein. Pakete validieren Mani
 - Vor Änderungen an Upload- oder Release-Abläufen die Freigabe-Gates in `RELEASE-GATES.md` lesen. Ein Test- oder Dry-Run-Schalter ersetzt keine notwendige Freigabe.
 - Keine bestehenden veröffentlichten Objekte automatisch löschen oder Releases zurückziehen. Bei unklarem Teilfehler anhalten und Status melden.
 - Vor Commit nur beabsichtigte Dateien stagen; nicht committen, sofern der Benutzer es nicht ausdrücklich verlangt.
+- Commit-Nachrichten auf Deutsch und im Stil `Bereich: Kernaussage` verfassen.
 
 ## Verifikation nach Codeänderungen
 
