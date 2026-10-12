@@ -60,7 +60,7 @@ Die konkrete URL muss vom Imager-Rechner erreichbar sein. Pakete validieren Mani
 ## Sicherheit und Veröffentlichungen
 
 - Keine destruktiven Aktionen, externen Uploads, Bucket-/Policy-Änderungen, Git-Tags, Pushes oder Releases ohne ausdrücklichen Auftrag und erforderliche Freigabe durchführen.
-- S3-Testveröffentlichungen sind von Produktionsveröffentlichungen getrennt. Produktionsimages und Imager-Manifeste werden nach den aktuellen Regeln in `RELEASE-GATES.md` veröffentlicht.
+- Der aktuelle GitHub-only-Produktionspfad ist ein temporärer Workaround für S3-Probleme. Zielarchitektur nach separater Reaktivierungsfreigabe sind gleichrangige GitHub- und S3-Produktionsquellen, wie in `RELEASE-GATES.md` festgelegt.
 - Vor Änderungen an Upload- oder Release-Abläufen die Freigabe-Gates in `RELEASE-GATES.md` lesen. Ein Test- oder Dry-Run-Schalter ersetzt keine notwendige Freigabe.
 - Keine bestehenden veröffentlichten Objekte automatisch löschen oder Releases zurückziehen. Bei unklarem Teilfehler anhalten und Status melden.
 - Vor Commit nur beabsichtigte Dateien stagen; nicht committen, sofern der Benutzer es nicht ausdrücklich verlangt.
