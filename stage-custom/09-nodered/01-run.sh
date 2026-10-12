@@ -6,7 +6,6 @@
 # --- Pins: vor dem Build prüfen ---------------------------------------------
 NODERED_VERSION="5.0.8"     # Platzhalter; echte Version vorher mit
                             # "npm view node-red dist-tags" nachsehen
-INSTALLER_REF="master"      # besser: Tag oder Commit-Hash für reproduzierbare Builds
 INSTALLER_URL="https://github.com/node-red/linux-installers/releases/latest/download/install-update-nodered-deb"
 
 # --- Installation -------------------------------------------------------------
