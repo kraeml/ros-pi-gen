@@ -32,7 +32,7 @@ def merge_headless_package(headless_dir: Path, output_dir: Path) -> None:
     zusammen. Generisch für Gate-2/3-Testpakete (Status test, Version mit
     -test-Suffix) und für die Headless-only-Übergangsregelung bei
     Produktionsreleases (Status production, Version ohne -test-Suffix,
-    siehe AGENTS.md). Die Variante bleibt bewusst auf headless beschränkt,
+    siehe RELEASE-GATES.md). Die Variante bleibt bewusst auf headless beschränkt,
     solange Desktop nicht erfolgreich bereitgestellt ist; ein künftiger
     Desktop-Merge braucht eine eigene, separat zu prüfende Erweiterung.
     """

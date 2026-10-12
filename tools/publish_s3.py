@@ -19,7 +19,7 @@ import package_image
 
 BUCKET = "ros-pi-gen-images"
 TEST_PREFIX = "ros-pi-gen-test"
-# Produktionspräfix (Etappe 4, AGENTS.md): ausschließlich über
+# Produktionspräfix (Etappe 4, RELEASE-GATES.md): ausschließlich über
 # publish_production_package() erreichbar, die zusätzlich zur
 # Freigabe-Env strukturell auf das Ziel 'hetzner' beschränkt ist — OMV
 # darf niemals Produktionsschreibrechte erhalten.
@@ -44,7 +44,7 @@ TARGETS = {
         "endpoint": "https://hel1.your-objectstorage.com",
         "region": "hel1",
         # Path-Style angenommen (analog zur bestätigten OMV-Installation);
-        # gemäß AGENTS.md vor dem ersten echten Schreibzugriff anonym
+        # gemäß RELEASE-GATES.md vor dem ersten echten Schreibzugriff anonym
         # verifizieren ("Keine Basis-URL raten") und ggf. korrigieren.
         "default_public_base_url": "https://hel1.your-objectstorage.com/ros-pi-gen-images",
         "write_approval_env": "ROS_PI_GEN_GATE3_WRITE_APPROVED",
@@ -269,7 +269,7 @@ def verify_uploaded_object(
 # der Rest des Publishers: bei einem Headless-Image von ~800 MB reicht das
 # AWS-CLI-Standardtimeout nicht immer aus und ein einzelner transienter
 # Verbindungsabbruch (z. B. "IncompleteRead") darf nicht sofort den
-# gesamten Produktions-/Test-Publish-Lauf abbrechen (AGENTS.md: bei einem
+# gesamten Produktions-/Test-Publish-Lauf abbrechen (RELEASE-GATES.md: bei einem
 # Teilfehler die Version nicht erneut verwenden -- ein robuster Download
 # verringert, wie oft dieser Fall überhaupt eintritt). Download-Timeout
 # bewusst deutlich höher als das Standard-CLI-Timeout (60s); Anzahl und
@@ -463,7 +463,7 @@ def validate_package(package_dir: Path) -> dict:
 def validate_production_package(package_dir: Path) -> dict:
     """Validiert ein Headless-only-Produktionspaket (Status production,
     Version ohne -test-Suffix) vor dem Publish nach ros-pi-gen/ (Etappe 4,
-    AGENTS.md Headless-only-Übergangsregelung). Identische Strukturprüfung
+    RELEASE-GATES.md Headless-only-Übergangsregelung). Identische Strukturprüfung
     wie validate_package(), nur mit dem Produktions-Versionsmuster."""
     return _validate_headless_package(
         package_dir,
@@ -703,10 +703,10 @@ def publish_production_image(
     """Veröffentlicht ausschließlich Image + Icon eines Headless-only-
     Produktionspakets (Status production) unter ros-pi-gen/releases/<version>/
     auf Hetzner und verifiziert beide anonym per HTTPS (Etappe 4,
-    AGENTS.md Headless-only-Übergangsregelung).
+    RELEASE-GATES.md Headless-only-Übergangsregelung).
 
     Lädt bewusst NICHT die S3-Manifeste hoch (siehe
-    publish_production_manifests()): AGENTS.md verlangt für
+    publish_production_manifests()): RELEASE-GATES.md verlangt für
     Produktionsreleases die Reihenfolge Image -> GitHub-Draft (mit allen
     Assets, inkl. desselben Image als separatem GitHub-Release-Asset) ->
     S3-Manifeste (versioniert, dann stabil) -> GitHub-Release
@@ -720,7 +720,7 @@ def publish_production_image(
 
     Gibt die validierten Paketdaten (metadata) zurück, damit der
     aufrufende Workflow denselben, einmal geprüften Stand für den
-    GitHub-Draft-Schritt wiederverwenden kann (AGENTS.md: "Hashes und
+    GitHub-Draft-Schritt wiederverwenden kann (RELEASE-GATES.md: "Hashes und
     Größen werden einmal im Paket erzeugt").
     """
     _require_production_target_and_approval(profile, endpoint, region, dry_run=dry_run)
@@ -802,13 +802,13 @@ def publish_production_manifests(
     dry_run: bool = False,
 ) -> None:
     """Veröffentlicht die S3-Manifeste (versioniert, dann stabil) eines
-    Headless-only-Produktionspakets auf Hetzner (Etappe 4, AGENTS.md
+    Headless-only-Produktionspakets auf Hetzner (Etappe 4, RELEASE-GATES.md
     Headless-only-Übergangsregelung).
 
     Setzt voraus, dass publish_production_image() für dieselbe Version
     bereits erfolgreich war (Image+Icon liegen unter
     ros-pi-gen/releases/<version>/ und sind anonym erreichbar) — dies wird
-    hier NICHT erneut geprüft, da das stabile Manifest laut AGENTS.md
+    hier NICHT erneut geprüft, da das stabile Manifest laut RELEASE-GATES.md
     ohnehin erst nach erfolgreichem GitHub-Draft-Schritt aktualisiert
     werden darf, der bereits auf denselben Image-Upload aufsetzt.
 
@@ -916,7 +916,7 @@ def publish_production_package(
     muss. Der produktionsscharfe Release-Workflow (Etappe 4) ruft
     stattdessen publish_production_image() und
     publish_production_manifests() einzeln auf, mit dem GitHub-Draft-
-    Schritt dazwischen (siehe deren Docstrings sowie AGENTS.md)."""
+    Schritt dazwischen (siehe deren Docstrings sowie RELEASE-GATES.md)."""
     metadata = publish_production_image(
         package_dir, profile, endpoint, region, public_base_url, dry_run=dry_run
     )
@@ -939,7 +939,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     # Nur für Paketstatus production relevant: erlaubt dem aufrufenden
     # Release-Workflow (Etappe 4), den GitHub-Draft-Schritt zwischen
-    # Image-Upload und Manifest-Upload einzuschieben (AGENTS.md-
+    # Image-Upload und Manifest-Upload einzuschieben (RELEASE-GATES.md-
     # Reihenfolge: Image -> GitHub-Draft -> S3-Manifeste -> GitHub-Release).
     # Ohne diese Option (Default) läuft weiterhin der komplette Ablauf in
     # einem Aufruf, wie für Gate-2/3-Testpakete (Status test) üblich.

@@ -157,7 +157,7 @@ def test_headless_merge_rejects_unknown_status(tmp_path):
 
 def test_publisher_source_is_headless_only():
     """Verifiziert weiterhin, dass es keinen generischen Desktop-/
-    Mehrvarianten-Pfad gibt (Headless-only-Übergangsregelung, AGENTS.md):
+    Mehrvarianten-Pfad gibt (Headless-only-Übergangsregelung, RELEASE-GATES.md):
     jedes Vorkommen von 'desktop' im Quelltext muss Teil einer
     raise-PublishError-Schutzklausel sein, und es gibt keine Variantenschleife.
 
@@ -241,7 +241,7 @@ def test_production_write_requires_dedicated_approval_env(tmp_path, monkeypatch)
 
 def test_hetzner_gate3_approval_does_not_authorize_production_write(tmp_path, monkeypatch):
     """Die bestehende Gate-3-Testfreigabe darf den neuen, separaten
-    Produktions-Freigabeschalter nicht mit-aktivieren (AGENTS.md: eigenes
+    Produktions-Freigabeschalter nicht mit-aktivieren (RELEASE-GATES.md: eigenes
     Gate pro Freigabeumfang)."""
     metadata = make_variant_package(
         tmp_path / "release", "headless", version="2026.09.1", status="production"
@@ -298,7 +298,7 @@ def test_publish_production_image_returns_metadata_without_touching_manifests(tm
     """publish_production_image() lädt ausschließlich Image+Icon hoch und
     liefert die validierten Paketdaten zurück, damit ein Workflow dazwischen
     den GitHub-Draft-Schritt einfügen kann, bevor die Manifeste
-    veröffentlicht werden (AGENTS.md-Reihenfolge, Etappe 4)."""
+    veröffentlicht werden (RELEASE-GATES.md-Reihenfolge, Etappe 4)."""
     metadata = make_variant_package(
         tmp_path / "release", "headless", version="2026.09.1", status="production"
     )
@@ -382,7 +382,7 @@ def test_production_image_hash_mismatch_is_distinct_from_missing_object(tmp_path
 def test_publish_production_manifests_requires_prior_image_publish(tmp_path, monkeypatch):
     """publish_production_manifests() bricht ab, wenn noch keine Objekte
     unter der Version liegen -- publish_production_image() muss laut
-    AGENTS.md-Reihenfolge zuerst erfolgreich gelaufen sein."""
+    RELEASE-GATES.md-Reihenfolge zuerst erfolgreich gelaufen sein."""
     metadata = make_variant_package(
         tmp_path / "release", "headless", version="2026.09.1", status="production"
     )
@@ -438,7 +438,7 @@ def test_version_scan_rejects_bare_production_root_prefix():
     """Der bloße Produktionspräfix 'ros-pi-gen/' ohne konkrete
     Versions-Unterebene ist nie erlaubt — keine bucketweite
     Produktionslistung, nur die gezielte Wiederverwendungsprüfung einer
-    einzelnen Version (AGENTS.md)."""
+    einzelnen Version (RELEASE-GATES.md)."""
     with pytest.raises(publish_s3.PublishError, match="Versionsprüfung"):
         publish_s3.list_version_objects(
             "hetzner-prod", "https://hel1.your-objectstorage.com", "hel1", "ros-pi-gen/"

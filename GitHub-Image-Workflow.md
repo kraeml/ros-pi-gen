@@ -1,13 +1,13 @@
 # GitHub-Image-Workflow: Planung (KI-Arbeitspapier)
 
-> **⚠️ Veraltet gegenüber [AGENTS.md](AGENTS.md) (Stand 2026-10-02):** Dieses
+> **⚠️ Veraltet gegenüber [RELEASE-GATES.md](RELEASE-GATES.md) (Stand 2026-10-02):** Dieses
 > Dokument plant GitHub Releases noch als alleiniges Downloadziel ohne S3,
 > ohne die Gate-1–4-Struktur und ohne die inzwischen umgesetzten
 > Make-Targets (`package-release`, `publish-s3-test`, `S3_TARGET=omv|hetzner`
 > in `tools/publish_s3.py`). Die `devices`-Tags in § 5 (`["pi3","pi4","pi5"]`)
 > und `capabilities: ["rpi_connect"]` sind ebenfalls überholt — gepinnt sind
 > inzwischen `pi3-64bit`/`pi4-64bit`/`pi5-64bit` ohne `capabilities`
-> (`tools/imager-schema-pin.json`). Bei Widersprüchen ist **AGENTS.md
+> (`tools/imager-schema-pin.json`). Bei Widersprüchen ist **RELEASE-GATES.md
 > maßgeblich**. Eine vollständige Überarbeitung dieses Arbeitspapiers ist
 > ausstehend; bis dahin nur als historischer Erstentwurf lesen, nicht als
 > aktuelle Spezifikation.
@@ -28,7 +28,7 @@
 > **Update 2026-10-02:** `.github/workflows/ci.yml` (Lint/Build/Test,
 > Push/PR) und `.github/workflows/ci-release.yml` (tag-getriggerter
 > Produktionsrelease-Workflow, Etappe 4) existieren inzwischen und folgen
-> der in AGENTS.md beschriebenen Struktur (S3 + GitHub als zwei
+> der in RELEASE-GATES.md beschriebenen Struktur (S3 + GitHub als zwei
 > unabhängige Downloadziele, nicht GitHub-only wie unten skizziert). Die
 > Stufen A–E und das YAML in § 3/§ 4 sind historischer Erstentwurf und
 > stimmen nicht mehr mit der tatsächlichen Implementierung überein.

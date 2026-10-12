@@ -1,24 +1,24 @@
 name: release
 
-# Produktions-Release-Workflow (Etappe 4, AGENTS.md): wird ausschließlich
+# Produktions-Release-Workflow (Etappe 4, RELEASE-GATES.md): wird ausschließlich
 # durch einen annotierten Produktions-Tag `image-YYYY.MM.PATCH` (ohne
 # -test-Suffix) ausgelöst. Dünner Adapter -- die gesamte Logik liegt in
 # Make-Targets und versionierten Skripten (tools/*.py, tools/*.sh),
-# identisch zum lokalen Ablauf (siehe README.md/AGENTS.md). Test-Trigger
+# identisch zum lokalen Ablauf (siehe README.md/RELEASE-GATES.md). Test-Trigger
 # veröffentlichen nichts: Gate-2/3-Testveröffentlichungen laufen
 # ausschließlich manuell/lokal über tools/publish-s3.sh unter
-# ros-pi-gen-test/ (AGENTS.md, Etappe 4). Der Tag-Filter schließt
+# ros-pi-gen-test/ (RELEASE-GATES.md, Etappe 4). Der Tag-Filter schließt
 # -test-Suffixe bereits aus; der zusätzliche Laufzeit-Guard unten prüft
 # zusätzlich das exakte CalVer-Format.
 #
-# Headless-only-Übergangsregelung (AGENTS.md): solange Desktop nicht
+# Headless-only-Übergangsregelung (RELEASE-GATES.md): solange Desktop nicht
 # bereitgestellt ist, veröffentlicht dieser Workflow ausschließlich
 # headless (Image, headless-os-list.json, SHA256SUMS und Icon).
 #
 # GITHUB_TOKEN wird von GitHub Actions automatisch bereitgestellt.
 #
 # Vor jedem echten Tag-Push, der diesen Workflow auslösen kann: Gate 4
-# (AGENTS.md) -- ausdrückliche Freigabe erforderlich.
+# (RELEASE-GATES.md) -- ausdrückliche Freigabe erforderlich.
 
 on:
   push:

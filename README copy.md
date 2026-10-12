@@ -126,7 +126,7 @@ Für den LAN-Test (Schülergeräte ohne WAN-Internet) gibt es einen zweiten,
 lokal ausführbaren Adapter, der ein Headless-Testpaket ausschließlich unter
 dem Testpräfix `ros-pi-gen-test/` auf dem OMV/MinIO-S3 veröffentlicht.
 Vollständige Policy (Profile, Präfixe, Freigabe-Gates, Rollback-Regeln) steht
-in [AGENTS.md](AGENTS.md); hier nur der Befehlsablauf:
+in [RELEASE-GATES.md](RELEASE-GATES.md); hier nur der Befehlsablauf:
 
 ```bash
 git tag -a image-YYYY.MM.PATCH-test -m "Gate 2 OMV headless test package"
@@ -159,7 +159,7 @@ https://s3-intern.kraeml-bayern.de/ros-pi-gen-images/ros-pi-gen-test/imager/head
 
 Identischer Ablauf wie Gate 2, nur mit `S3_TARGET=hetzner` (eigener
 Freigabeschalter `ROS_PI_GEN_GATE3_WRITE_APPROVED`, eigenes Profil
-`hetzner-prod`). Volle Policy in [AGENTS.md](AGENTS.md):
+`hetzner-prod`). Volle Policy in [RELEASE-GATES.md](RELEASE-GATES.md):
 
 ```bash
 git tag -a image-YYYY.MM.PATCH-test -m "Gate 3 Hetzner headless test package"
@@ -184,7 +184,7 @@ Desktop nicht bereitgestellt ist, baut und veröffentlicht der Workflow
 ausschließlich die Variante headless.
 
 Voraussetzungen vor dem ersten echten Produktions-Tag (siehe
-[AGENTS.md](AGENTS.md), Etappe 4, Gate 4):
+[RELEASE-GATES.md](RELEASE-GATES.md), Etappe 4, Gate 4):
 
 1. Repo-Secrets `HETZNER_ACCESS_KEY_ID` und `HETZNER_SECRET_ACCESS_KEY`
    manuell anlegen (GitHub → Settings → Secrets and variables →
@@ -198,7 +198,7 @@ Voraussetzungen vor dem ersten echten Produktions-Tag (siehe
    gepusht wird — ein solcher Push löst den vollständigen Build+Publish-
    Lauf inklusive echtem S3-Upload und GitHub-Release aus.
 
-Reihenfolge im Workflow (AGENTS.md: Image zuerst, dann GitHub-Draft, dann
+Reihenfolge im Workflow (RELEASE-GATES.md: Image zuerst, dann GitHub-Draft, dann
 S3-Manifeste, dann GitHub-Veröffentlichung):
 
 ```bash
@@ -666,7 +666,7 @@ Der Docker-Build registriert qemu-aarch64 nötigenfalls selbst im Container.
 | `tools/build-docker.sh` | Build-Orchestrierung: binfmt-Entry setzen → build-docker.sh → cleanup immer (trap EXIT/INT/TERM, Ctrl+C inklusive) |
 | `tools/package_image.py` | Paketiert ein Build-Artefakt zu Image + `os-list.json` + `SHA256SUMS`; prüft Tag/Version/Status und auditiert Release-Builds (Quickfix-Freiheit) |
 | `tools/merge_test_packages.py` | Fasst ein Headless-Testpaket zu einem vollständigen Gate-2-Release-Paketverzeichnis zusammen (siehe [Gate 2](#gate-2-lokale-testveröffentlichung-nach-omvminio-s3)) |
-| `tools/publish-s3.sh`, `tools/publish_s3.py` | Lokaler OMV/MinIO-Gate-2-Adapter: validiert das Release-Paket und veröffentlicht es ausschließlich unter `ros-pi-gen-test/` (Policy/Details: [AGENTS.md](AGENTS.md)) |
+| `tools/publish-s3.sh`, `tools/publish_s3.py` | Lokaler OMV/MinIO-Gate-2-Adapter: validiert das Release-Paket und veröffentlicht es ausschließlich unter `ros-pi-gen-test/` (Policy/Details: [RELEASE-GATES.md](RELEASE-GATES.md)) |
 | `vm/robotics-lab-vm/` | git-Submodul ([robotics-lab-vm](https://codeberg.org/kraeml/robotics-lab-vm)) — Vagrant-VM Ubuntu 24.04 als Build-Umgebung (siehe [Build in der VM](#build-in-der-vm-robotics-lab-vm)) |
 | `work/`, `deploy/` | Build-Erzeugnisse (gitignored): pi-gen-Arbeitsverzeichnis bzw. Image + `build-docker.log` |
 

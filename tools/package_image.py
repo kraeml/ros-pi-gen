@@ -47,7 +47,7 @@ def render_sha256sums(entries: dict[str, str]) -> str:
     sortiert nach Dateiname für deterministische Ausgabe.
 
     Aktuell schreiben `package_image()` und `merge_headless_package()`
-    jeweils nur eine Zeile (Headless-only-Übergangsregelung, AGENTS.md).
+    jeweils nur eine Zeile (Headless-only-Übergangsregelung, RELEASE-GATES.md).
     Diese Funktion ist bewusst generisch für mehrere Einträge gehalten,
     damit ein künftiger vollständiger Produktions-Merge (Headless+Desktop)
     dieselbe Funktion ohne Formatänderung wiederverwenden kann.
@@ -88,7 +88,7 @@ def fetch_device_catalog(url: str, target: Path, expected_devices_sha256: str) -
     Die Datei unter `device_catalog_url` ist kein stabiles Release-Artefakt:
     sie enthält neben den Geräte-Metadaten auch die komplette, täglich neu
     generierte OS-Liste (u. a. Nightly-Builds), die sich faktisch jeden Tag
-    ändert (siehe AGENTS.md § „devices-Tags" — nur die Gerätetags müssen
+    ändert (siehe RELEASE-GATES.md § „devices-Tags" — nur die Gerätetags müssen
     verifiziert werden). Ein SHA-256-Pin auf die Gesamtdatei würde daher bei
     jedem frischen Abruf ohne lokalen Cache zuverlässig fehlschlagen (beob.
     2026-10-02: identischer `imager.devices`-Block, aber geänderter
@@ -384,12 +384,12 @@ def write_manifest(
 
     `output_name` ist bewusst parametrisiert statt hart auf `os-list.json`
     verdrahtet: Der S3-Publish-Pfad nutzt weiterhin den Default
-    `os-list.json` (stabiles/-versioniertes S3-Manifest, AGENTS.md), ein
+    `os-list.json` (stabiles/-versioniertes S3-Testmanifest, RELEASE-GATES.md), ein
     GitHub-Release-Adapter kann denselben Renderer für die
     variantenpräfigierten GitHub-Assets (`headless-os-list.json`,
     `desktop-os-list.json`) mit derselben Schemavalidierung, aber einer
     eigenen, versionierten GitHub-Release-Asset-Basis-URL wiederverwenden
-    (AGENTS.md § „make package und Manifest-Rendering“, Punkt 4: Schema ist
+    (RELEASE-GATES.md § „make package und Manifest-Rendering“, Punkt 4: Schema ist
     identisch, nur Dateiname und Basis-URL unterscheiden sich je Ziel).
 
     `output_dir` ist separat von `package_dir` parametrisiert, damit der
@@ -455,7 +455,7 @@ def write_manifest(
 
 def github_manifest_name(variant: str) -> str:
     """Kanonischer GitHub-Release-Asset-Dateiname je Variante
-    (`headless-os-list.json` / `desktop-os-list.json`, AGENTS.md § „Ein
+    (`headless-os-list.json` / `desktop-os-list.json`, RELEASE-GATES.md § „Ein
     vollständiges Produktionsrelease“)."""
     if variant not in VARIANTS:
         raise PackageError(f"Unbekannte Paketvariante: {variant}")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GitHub-Release-Adapter für Produktions-Images (Etappe 4, AGENTS.md).
+"""GitHub-Release-Adapter für Produktions-Images (Etappe 4, RELEASE-GATES.md).
 
 Dünner Wrapper um die `gh`-CLI (nutzt lokal die vorhandene `gh auth`-Sitzung,
 in CI das automatisch bereitgestellte `GITHUB_TOKEN`). Macht KEINE S3-Calls
@@ -7,7 +7,7 @@ und berührt KEINE lokalen Paketierungsschritte — erwartet ein fertiges
 Headless-only-Produktionspaket (siehe tools/merge_test_packages.py,
 Status production) als Eingabe.
 
-Reihenfolge laut AGENTS.md (Etappe 4):
+Reihenfolge laut RELEASE-GATES.md (Etappe 4):
   1. Draft-Release mit allen Assets erstellen (create_draft_release).
      Draft-Assets werden NUR über die authentifizierte API geprüft
      (verify_draft_assets), NIEMALS anonym abgerufen.
@@ -17,7 +17,7 @@ Reihenfolge laut AGENTS.md (Etappe 4):
 
 Scheitert Schritt 3 oder 4, bleibt der Draft (bzw. das veröffentlichte,
 aber noch nicht extern verifizierte Release) stehen — keine automatische
-Rückziehung (AGENTS.md: "Release nicht automatisch zurückziehen").
+Rückziehung (RELEASE-GATES.md: "Release nicht automatisch zurückziehen").
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import package_image
 # https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases:
 # "Each file included in a release must be under 2 GiB."). Vor jeder
 # Veröffentlichung erneut gegen die tatsächliche Dokumentation prüfen
-# (AGENTS.md: "aktuelles GitHub-Assetgrößenlimit ... zum
+# (RELEASE-GATES.md: "aktuelles GitHub-Assetgrößenlimit ... zum
 # Umsetzungszeitpunkt verifizieren").
 GITHUB_ASSET_SIZE_LIMIT = 2 * 1024 * 1024 * 1024
 
@@ -211,7 +211,7 @@ def github_asset_paths(package_dir: Path, metadata: dict) -> dict[str, Path]:
 
 def check_asset_sizes(paths: dict[str, Path]) -> None:
     """Bricht ab, falls ein Asset das aktuelle GitHub-Assetgrößenlimit
-    überschreitet (AGENTS.md: "vor Veröffentlichung ... prüfen; bei
+    überschreitet (RELEASE-GATES.md: "vor Veröffentlichung ... prüfen; bei
     Überschreitung stoppen und alternative Verteilung abstimmen")."""
     for label, path in paths.items():
         size = path.stat().st_size
@@ -229,7 +229,7 @@ def create_draft_release(package_dir: Path, metadata: dict) -> str:
     Liefert den Tag-Namen zurück.
 
     Prereleases/Drafts dürfen `latest` nie verändern (`gh release create`
-    markiert Drafts nie automatisch als latest) -- AGENTS.md: "Ihre
+    markiert Drafts nie automatisch als latest) -- RELEASE-GATES.md: "Ihre
     Image-URLs müssen auf das jeweilige versionierte Release-Asset ...
     zeigen" und "latest darf nur auf ein vollständiges ... Produktions-
     release zeigen".
@@ -269,7 +269,7 @@ def create_draft_release(package_dir: Path, metadata: dict) -> str:
 def verify_draft_assets(tag: str, expected_names: set[str]) -> None:
     """Prüft NUR über die authentifizierte GitHub-API Existenz und Größe
     der Draft-Assets -- niemals anonymer Abruf vor der Veröffentlichung
-    (AGENTS.md: "Im Draft nur Existenz und Größe der Assets über die
+    (RELEASE-GATES.md: "Im Draft nur Existenz und Größe der Assets über die
     authentifizierte GitHub-API prüfen; Draft-Assets nicht anonym
     abrufen")."""
     result = run_gh(["release", "view", tag, "--json", "assets,isDraft"])

@@ -89,11 +89,12 @@ make build VARIANT=headless
 make test
 ```
 
-Das Image und Build-Logs liegen unter `deploy/`. `RELEASE_BUILD=1` ist Standard; dabei wird die temporäre Test-Seed-Stage deaktiviert und das Image vor dem Paketieren auditiert. Produktionsveröffentlichungen und ihre Freigabegates sind in [AGENTS.md](AGENTS.md) festgelegt.
+Das Image und Build-Logs liegen unter `deploy/`. `RELEASE_BUILD=1` ist Standard; dabei wird die temporäre Test-Seed-Stage deaktiviert und das Image vor dem Paketieren auditiert. Produktionsveröffentlichungen und ihre Freigabegates sind in [RELEASE-GATES.md](RELEASE-GATES.md) festgelegt.
 
 Weitere technische Dokumente:
 
 - [AccessPopup-Betreiberhinweise](AccessPopup.md)
 - [Tests und Abnahme](tests/README.md)
 - [Ansible im Build-Prozess](Ansible-im-Build.md)
-- [Historischer GitHub-Image-Workflow-Entwurf](GitHub-Image-Workflow.md) — nicht maßgeblich; aktuelle Release-Regeln stehen in `AGENTS.md`.
+- [Release-Gates und Veröffentlichungsregeln](RELEASE-GATES.md) — maßgeblich für Produktions- und S3-Testveröffentlichungen.
+- [Historischer GitHub-Image-Workflow-Entwurf](GitHub-Image-Workflow.md) — nicht maßgeblich; allgemeine Agentenanweisungen stehen in `AGENTS.md`.

@@ -1,18 +1,18 @@
 name: ci
 
-# Thin-Wrapper-Adapter (AGENTS.md, Etappe 4): dieser Workflow ruft
+# Thin-Wrapper-Adapter (RELEASE-GATES.md, Etappe 4): dieser Workflow ruft
 # ausschließlich dieselben Make-Targets auf, die auch lokal laufen
 # (siehe README.md, Abschnitt "Was passiert im Hintergrund"). Keine
 # Build-/Test-Logik liegt im Workflow selbst.
 #
 # Umfang dieses Workflows (bewusst eingegrenzt, Headless-only-
-# Übergangsregelung, AGENTS.md Etappe 4): CI-Parität für Lint, Setup,
+# Übergangsregelung, RELEASE-GATES.md Etappe 4): CI-Parität für Lint, Setup,
 # Build und Test der Variante headless bei jedem Push/PR. Kein
 # Release-Trigger, kein S3-Publish, kein GitHub-Release — die
 # Produktions-Publish-Logik (S3 status=production, GitHub-Release)
 # ist noch nicht implementiert und daher nicht Teil dieses Workflows.
 # Gate-2/3-Testveröffentlichungen erfolgen weiterhin ausschließlich
-# manuell/lokal über tools/publish-s3.sh (AGENTS.md).
+# manuell/lokal über tools/publish-s3.sh (RELEASE-GATES.md).
 
 on:
   push:
