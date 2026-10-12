@@ -4,22 +4,18 @@ NODERED_VERSION="5.0.8"     # Platzhalter, vor dem Build prüfen
 INSTALLER_REF="master"      # besser: Tag oder Commit-Hash
 INSTALLER_URL="https://raw.githubusercontent.com/node-red/linux-installers/${INSTALLER_REF}/deb/update-nodejs-and-nodered"
 
-# Installer als Benutzer ausführen; Variablen explizit durchreichen
 on_chroot << EOF
 set -e
-runuser -u "${FIRST_USER_NAME}" -- bash -c '
-  set -e
-  curl -fsSL "${INSTALLER_URL}" -o /tmp/nodered-installer.sh
-  bash /tmp/nodered-installer.sh \\
-    --confirm-root \\
-    --confirm-install \\
-    --node24 \\
-    --nodered-version="${NODERED_VERSION}" \\
-    --confirm-pi \\
-    --nodered-user="${FIRST_USER_NAME}" \\
-    --no-init
-  rm -f /tmp/nodered-installer.sh
-'
+curl -fsSL "${INSTALLER_URL}" -o /tmp/nodered-installer.sh
+bash /tmp/nodered-installer.sh \\
+  --confirm-root \\
+  --confirm-install \\
+  --node24 \\
+  --nodered-version="${NODERED_VERSION}" \\
+  --confirm-pi \\
+  --nodered-user="${FIRST_USER_NAME}" \\
+  --no-init
+rm -f /tmp/nodered-installer.sh
 EOF
 
 # Versionen festhalten (Variable wird hier von pi-gen aufgelöst)
