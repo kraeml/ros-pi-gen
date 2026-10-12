@@ -30,7 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: recursive
+          submodules: false
+      
+      - name: pi-gen-Submodul holen
+        run: git submodule update --init --depth=1 pi-gen
+
       # make lint führt bereits arm64-Container-Tests aus
       # (test_hostname_ssid.py, debian:trixie), nicht erst make build —
       # ohne registrierten arm64-Interpreter scheitert das auf dem

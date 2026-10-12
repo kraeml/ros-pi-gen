@@ -43,9 +43,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: recursive
+          submodules: false
           fetch-depth: 0
           fetch-tags: true
+      
+      - name: pi-gen-Submodul holen
+        run: git submodule update --init --depth=1 pi-gen
 
       - name: Python-Umgebung für Preflight
         run: make venv
