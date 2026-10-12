@@ -1,7 +1,38 @@
 #!/bin/bash
+# /etc/update-motd.d/50-doitpi – Status und Zugangsdaten bei jedem Login
+
+# Erste IPv4-Adresse des Hosts; leer, wenn kein Netz vorhanden ist
+ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+ip=${ip:-"<keine IP>"}
+host=$(hostname)
+
+# Standardbenutzer (UID 1000); ohne Treffer gilt ein Platzhalter
+USER_NAME=$(getent passwd 1000 | cut -d: -f1)
+USER_NAME=${USER_NAME:-benutzer}
+
 if [[ -e /var/lib/doitpi/firstboot.done ]]; then
-    echo "DoItPi: Erster Start abgeschlossen."
+    # Boxbreite 59:  57 Zeichen Inhalt, dazu je ein Leerzeichen links und rechts
+    line() { printf '║ %-57s ║\n' "$1"; }
+
+    echo
+    echo "╔═══════════════════════════════════════════════════════════╗"
+    line "DoItPi eingerichtet - Zugriff im Browser"
+    echo "╠═══════════════════════════════════════════════════════════╣"
+    line ""
+    line "code-server (VS Code im Browser)"
+    line "  Adresse:  http://${ip}:8080"
+    line "  Passwort: change_me"
+    line ""
+    line "JupyterLab (Python-/ROS-Notebooks)"
+    line "  Adresse:  http://${ip}:8888"
+    line "  Login:    ohne Passwort (nur im Heimnetz nutzen!)"
+    line ""
+    line "Terminal:   ssh ${USER_NAME}@${host}.local"
+    line "            ssh ${USER_NAME}@${ip}"
+    echo "╚═══════════════════════════════════════════════════════════╝"
+    echo
 else
     echo "DoItPi: Erster Start läuft noch oder ist fehlgeschlagen."
     echo "        Details: journalctl -u doitpi_firstboot.service"
 fi
+
