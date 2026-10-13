@@ -78,9 +78,15 @@ if [[ -e "${MARKER}" ]]; then
     exit 0
 fi
 
-# Erfolg der Cloud-init-Netzwerkstufe vor der Benutzerermittlung sicherstellen.
-CLOUDINIT_STATUS=0
-cloudinit_init_ok || CLOUDINIT_STATUS=$?
+# Auf Abschluss der Cloud-init-Stufe "init" warten (max. 120 s)
+CLOUDINIT_STATUS=1
+for _ in $(seq 1 60); do
+    CLOUDINIT_STATUS=0
+    cloudinit_init_ok || CLOUDINIT_STATUS=$?
+    (( CLOUDINIT_STATUS == 0 )) && break
+    sleep 2
+done
+# Nach Ablauf der Wartezeit: ohne erfolgreiche Stufe nicht weitermachen
 if (( CLOUDINIT_STATUS != 0 )); then
     case "${CLOUDINIT_STATUS}" in
         1) log "Cloud-init-Netzwerkstufe mit Fehlern oder nicht beendet, Marker wird nicht gesetzt." ;;
@@ -100,6 +106,7 @@ if [[ -z "${USER_ENTRY}" ]]; then
 fi
 USER_NAME=$(echo "${USER_ENTRY}" | cut --delimiter=: --fields=1)
 USER_HOME=$(echo "${USER_ENTRY}" | cut --delimiter=: --fields=6)
+USER_GROUP=$(id --group --name "${USER_NAME}")
 
 # Ansible-Test 1 (immer, auch offline): Das Modul "ping" prüft, ob Ansible
 # und der System-Python zusammenarbeiten. Es ist kein ICMP-Ping und ändert
@@ -122,6 +129,7 @@ if [[ "${USER_NAME}" != "pi" ]]; then
         {
             replace_in_files '/home/pi\b' "${USER_HOME}" /etc/systemd/system
             replace_in_files '^User=pi$' "User=${USER_NAME}" /etc/systemd/system
+            replace_in_files '^Group=pi$' "Group=${USER_GROUP}" /etc/systemd/system
         } | sort -u
     )
 fi

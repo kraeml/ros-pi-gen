@@ -1,13 +1,17 @@
 [Unit]
 Description=Einmaliges Skript für den ersten Start von DoitPi
+# Reihenfolge: nach der cloud-init-Stufe "init". Die eigentliche
+# Fertigmeldung prüft das Skript selbst (Warteschleife).
 Wants=cloud-init-network.service
 After=cloud-init-network.service
 ConditionPathExists=/usr/local/sbin/doitpi_firstboot.sh
+# Zusätzlich: nicht erneut starten, wenn der Marker existiert
+ConditionPathExists=!/var/lib/doitpi/firstboot.done
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/doitpi_firstboot.sh
-TimeoutStartSec=120
+TimeoutStartSec=300
 
 [Install]
 WantedBy=multi-user.target
