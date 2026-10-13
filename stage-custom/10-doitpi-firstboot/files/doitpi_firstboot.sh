@@ -3,7 +3,7 @@
 #
 # Aufgaben:
 #   - Ansible und Python-Interpreter prüfen (Warnung bei Fehler, kein Abbruch)
-#   - Alte Benutzer- und Pfadangaben (/home/pi, User=pi) in systemd-Units ersetzen
+#   - Alte Benutzer- und Pfadangaben (/home/pi, User=pi, Group=pi) in systemd-Units ersetzen
 #   - Ersten Start als erledigt markieren und bei Änderungen sauber neu starten
 #   - Alte /home/pi-Pfade im Home-Verzeichnis des Benutzers ersetzen
 
@@ -53,16 +53,26 @@ PY
 
 # Hilfsfunktion: Text in allen Dateien eines Verzeichnisses ersetzen.
 # Aufruf: replace_in_files <suchmuster> <ersatz> <verzeichnis>
-# Das Suchmuster ist ein regulärer Ausdruck (GNU sed, Basismodus).
+# Regex-Gruppen: Zielpräfix, optionaler Restpfad, Abschlusszeichen.
 # Ausgabe: Pfade der tatsächlich geänderten Dateien auf stdout, eine pro Zeile.
+OLD_HOME_REGEX="(/home/pi)(/[^[:space:]]*)?([[:space:]]|['\"]|\\]|\\}|\\)|>|=|,|:|;|$)"
+
+escape_sed_replacement() {
+    local value="$1"
+    value=${value//\\/\\\\}
+    value=${value//&/\\&}
+    value=${value//@/\\@}
+    printf '%s' "${value}"
+}
+
 replace_in_files() {
     local search="$1" replace="$2" dir="$3" file
     # grep findet nur Dateien mit Treffer, sed läuft also nur dort.
     # "|| true", weil grep ohne Treffer mit 1 endet und set -e sonst abbricht.
     while IFS= read -r -d '' file; do
-        sed --in-place "s|${search}|${replace}|g" "${file}"
+        sed --in-place --regexp-extended "s@${search}@${replace}@g" "${file}"
         echo "${file}"
-    done < <(grep --recursive --files-with-matches --null -- "${search}" "${dir}" 2>/dev/null || true)
+    done < <(grep --recursive --extended-regexp --files-with-matches --null -- "${search}" "${dir}" 2>/dev/null || true)
 }
 
 # Nur als root ausführen, da systemweite Dateien geändert werden
@@ -121,13 +131,14 @@ if ! ansible \
 fi
 
 # Alte Pfade und Benutzernamen in den systemd-Units ersetzen.
-# "/home/pi" nur als ganzer Pfadbestandteil, damit z. B. /home/pilot unberührt bleibt.
+# Der Matcher behandelt /home/pi nur als vollständigen Pfadbestandteil.
 # Sind Dateien geändert worden, ist ein Neustart nötig, damit systemd sie einliest.
 CHANGED_FILES=""
 if [[ "${USER_NAME}" != "pi" ]]; then
     CHANGED_FILES=$(
         {
-            replace_in_files '/home/pi\b' "${USER_HOME}" /etc/systemd/system
+            USER_HOME_SED=$(escape_sed_replacement "${USER_HOME}")
+            replace_in_files "${OLD_HOME_REGEX}" "${USER_HOME_SED}\\2\\3" /etc/systemd/system
             replace_in_files '^User=pi$' "User=${USER_NAME}" /etc/systemd/system
             replace_in_files '^Group=pi$' "Group=${USER_GROUP}" /etc/systemd/system
         } | sort -u
@@ -160,24 +171,19 @@ if [[ "${USER_NAME}" != "pi" ]]; then
     #   || true                      : "keine Treffer" (Exit-Code 1) ist ein
     #                                  normaler Zustand und darf wegen
     #                                  "set -e" nicht zum Abbruch führen
-    #   \b (Wortgrenze) verhindert Fehlersetzungen in Pfaden wie /home/pixel.
-    #   "/home/pi/platformio-env" wird korrekt erkannt, weil auf das "i"
-    #   ein "/" folgt. \b setzt GNU grep und GNU sed voraus (Standard auf
-    #   Raspberry Pi OS).
+    #   /home/pi/platformio-env wird gefunden; /home/pi-extra bleibt unberührt.
     mapfile -d '' home_files < <(
-        grep --recursive --binary-files=without-match --files-with-matches \
+        grep --recursive --binary-files=without-match --extended-regexp --files-with-matches \
              --null --no-messages \
              --exclude-dir=.cache \
-             '/home/pi\b' "${USER_HOME}" || true
+             "${OLD_HOME_REGEX}" "${USER_HOME}" || true
     )
 
     if (( ${#home_files[@]} > 0 )); then
         log "Ersetze /home/pi in ${#home_files[@]} Dateien unter ${USER_HOME}."
 
-        # \b (Wortgrenze) verhindert Fehlersetzungen in Pfaden wie /home/pixel.
-        # "/home/pi/platformio-env" wird korrekt erkannt, weil auf das "i"
-        # ein "/" folgt. \b setzt GNU sed voraus (Standard auf Raspberry Pi OS).
-        sed --in-place "s|/home/pi\b|${USER_HOME}|g" "${home_files[@]}"
+        USER_HOME_SED=$(escape_sed_replacement "${USER_HOME}")
+        sed --in-place --regexp-extended "s@${OLD_HOME_REGEX}@${USER_HOME_SED}\\2\\3@g" "${home_files[@]}"
 
         # sed --in-place legt intern eine neue Datei an. Läuft das Skript als
         # root, kann der Besitzer dabei wechseln; chown stellt ihn wieder her.
