@@ -19,6 +19,7 @@ Das Root-`Makefile` ist der zentrale Einstiegspunkt. GitHub Actions und andere R
 ## Arbeitsweise und Codekonventionen
 
 - Vor Änderungen die betroffenen Dateien und benachbarten Tests lesen. Bestehende Architektur, Abhängigkeiten, Dateinamen, Formatierung und Fehlerbehandlung fortführen.
+- Projektbezogene Änderungen auf einem git-flow-Feature-Branch bearbeiten; nicht direkt auf `develop` oder `main` arbeiten. Freigabe-Gates bleiben zusätzlich an `RELEASE-GATES.md` gebunden.
 - Build-, Manifest- und Veröffentlichungslogik in versionierten Skripten bzw. Make-Targets halten. Workflow-Dateien sollen möglichst nur Checkout, Runner-Setup, Secrets-Injektion und Aufrufe dieser Targets enthalten.
 - Python-Tools und Tests orientieren sich an den vorhandenen Modulen und pytest-Mustern. Shellskripte mit sicherem Fehlerverhalten (`set -euo pipefail`, wo passend) schreiben und ShellCheck-Konventionen beachten.
 - Keine Kommentare hinzufügen, außer wenn ausdrücklich verlangt. Keine Secrets, Passwörter, privaten Schlüssel oder lokalen Zugangsdaten in Repository-Dateien oder Logs aufnehmen.
