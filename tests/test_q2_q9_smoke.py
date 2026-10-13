@@ -137,3 +137,38 @@ def test_q9_nm_dispatcher_unit(crun):
     assert state in ("enabled", "enabled-runtime", "static", "indirect"), (
         f"NetworkManager-dispatcher ist {state!r}; erwartet aktivierbare Unit"
     )
+
+
+def test_dev_services_enabled_in_image(crun, pack):
+    services = (
+        ("nodered.service", "/etc/systemd/system/nodered.service"),
+        ("jupyter.service", "/etc/systemd/system/jupyter.service"),
+    )
+    for unit, path in services:
+        assert imageio.debugfs_exists(pack.root_img, path), f"{path} fehlt im Image"
+        result = crun(["systemctl", "is-enabled", unit])
+        assert result.rc == 0 and result.stdout.strip() == "enabled", _fail(result)
+
+    homes = imageio.debugfs_ls(pack.root_img, "/home")
+    username = next(
+        (
+            name
+            for name in homes
+            if imageio.debugfs_exists(
+                pack.root_img,
+                f"/home/{name}/.config/code-server/config.yaml",
+            )
+        ),
+        None,
+    )
+    assert username, "code-server-Konfiguration des Build-Benutzers fehlt"
+
+    result = crun(["/usr/bin/node-red", "--version"])
+    result = crun(["/usr/bin/node-red", "--version"])
+    assert result.rc == 0 and result.stdout.strip(), _fail(result)
+    result = crun(["/usr/bin/code-server", "--version"])
+    assert result.rc == 0 and result.stdout.strip(), _fail(result)
+    result = crun([f"/home/{username}/jupyter-env/bin/jupyter", "--version"])
+    assert result.rc == 0 and result.stdout.strip(), _fail(result)
+    result = crun([f"/home/{username}/platformio-env/bin/pio", "--version"])
+    assert result.rc == 0 and result.stdout.strip(), _fail(result)
