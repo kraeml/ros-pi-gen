@@ -42,6 +42,7 @@ idempotent darin und ruft pytest auf. Alternativ direkt:
 
 | Werkzeug | Wofür |
 |---|---|
+| Docker Engine | Firstboot-Laufzeittests (`test_doitpi_firstboot.py`) bauen bei Bedarf das native `tests/docker/firstboot`-Testimage; ohne erreichbare Docker-Engine werden nur diese Tests mit `pytest.skip` übersprungen. Kein Raspberry Pi und keine arm64-Emulation nötig |
 | Docker Engine + arm64-Emulation | Container-Tests (Q1a, Q2–Q9, hostname-SSID) — `docker run --platform linux/arm64 debian:trixie true` muss gehen; die Suite setzt den nötigen OFD-tauglichen Container-qemu-Entry **selbst** (Sessionstart, `tools/binfmt.sh setup` — gleicher Version-Gate-Mechanismus wie beim Build; auf Host-qemu ≥ 6 (MIN_MAJOR) No-op; Opt-out `PIGEN_TEST_NO_BINFMT=1`). Hintergrund: nach `make build` ist der Build-Entry entfernt und Host-qemu 4.x wedged systemd beim Q1a-Container-Boot (fcntl-OFD → EINVAL) |
 | `7z`, `debugfs` (e2fsprogs) | Boot-Partition entpacken, ext4 lesen (ohne Root) |
 | nftables-Hilfscontainer | Q6 (wird einmalig gebaut, dann gecached) |
@@ -75,6 +76,12 @@ Kein sudo nötig.
 | `test_q9` | Q9 | `NetworkManager-dispatcher` vorhanden/aktivierbar | Container |
 | `test_overlay_*` | – | Overlay-Dateien: Exec-Bits, `00-packages` je Stage, AccessPopup-Dateisatz | Repo-Dateien |
 | `test_hostname_ssid[*]` | §8.6 | `hostname-ssid.sh`-Logik: `<hostname>-AP`, Umlaute, Kürzung, Fallback, idempotent; **Hostnamenwechsel** (Dispatcher-Fall: SSID folgt neuem Hostnamen statt bestehendem `ap_ssid`) | Docker (stub-hostname) |
+| `test_doitpi_firstboot.py` | – | Echtes Firstboot-Skript: Cloud-init-Status (sofort/verzögert/Fehler/Timeout), Marker, UID-1000-Benutzer, Primärgruppe, Pfadgrenzen einschließlich quoted Pfaden, `.bak` und Backslash-Fällen, plus `USER_HOME`-Escaping | Docker-Testcontainer, kein Pi |
+| `test_image_nodered_unit_and_service_enabled` | – | Node-RED-Override, Build-Versionsdatei, Binary und Aktivierungslink im Image | debugfs, gebautes Image |
+| `test_image_ansible_user_services_expected_config` | – | Jupyter-Unit/-Autostart/-venv, code-server-Konfiguration/-Binary und PlatformIO-CLI/udev-Regel im Image | debugfs, gebautes Image |
+| `test_image_code_server_deferred_activation_and_unit` | – | code-server-Service-Link für Build-Benutzer und Template-Unit; Firstboot aktiviert zusätzlich die Instanz für den konfigurierten Benutzer | debugfs, gebautes Image |
+| `test_dev_services_enabled_in_image` | – | `systemctl is-enabled` für Node-RED und Jupyter im RootFS-Container; Versionsaufruf für Node-RED, code-server, Jupyter und PlatformIO | Docker, gebautes Image |
+| `test_image_ansible_roles_ausgerollt` | – | Ausgerollte Ansible-Rollen für Jupyter, code-server und PlatformIO | debugfs, gebautes Image |
 | `test_extras_*` | TODO Block 3 | docker-ce/ansible installiert, docker.service enabled, cloud-init ok | Container |
 
 ## Architektur (Build-Host-Ebene)
@@ -221,6 +228,10 @@ echter Kernel, echte Peripherie.
   meldet auch interne Fehler trotz „erfolgreich beendet").
 - Hardware-Gruppen A–D (AP-Verhalten, Captive Portal, Isolation, Mehrgeräte)
   bleiben manuell — die Automatisierung liefert nur Beobachtungen.
+
+Die Firstboot-Laufzeittests führen das Originalskript in einem kurzlebigen Docker-Container aus. `status.json`-Fixtures bilden exakt den vom Skript geparsten Pfad `v1.init` mit `errors` sowie `end` beziehungsweise `finished` ab. `sleep` wird gestubbt und kehrt sofort zurück; der Timeout-Fall durchläuft trotzdem alle 60 Schleifendurchgänge. `seq` und `cut` bleiben echte Container-Werkzeuge. `getent`, `id`, `ansible`, `systemctl`, `chown` und `sync` werden kontrolliert gestubbt. Das Testimage basiert auf Debian Trixie und installiert Python 3; es wird lokal gebaut und nicht aus einem Raspberry-Pi-Image abgeleitet. Im Repository lag keine reale Cloud-init-`status.json` zum Abgleich vor; die Fixtures validieren daher den Parservertrag, nicht unabhängig die konkrete Cloud-init-Ausgabe.
+
+Die Dienstprüfungen in `test_image_files.py` sind Installations-/Konfigurationsprüfungen am gebauten Image. `test_dev_services_enabled_in_image` prüft zusätzlich systemd-Aktivierungszustände im RootFS-Container und ruft die Versionskommandos der Programme auf; dieser Smoke-Test ist im `make lint`-Subset enthalten und prüft weder den systemd-Boot noch Netzwerk-Erreichbarkeit. code-server besitzt im Image eine aktivierte Build-Benutzer-Instanz; Firstboot wechselt bei abweichendem Imager-Benutzer die Unit-Angaben und aktiviert dessen Instanz. PlatformIO ist ein CLI-Werkzeug und wird nicht als systemd-Dienst behandelt. Echte Dienststarts und Erreichbarkeit benötigen weiterhin einen separaten bootfähigen Image-/Hardwaretest.
 
 ## Umgebungsvariablen
 
