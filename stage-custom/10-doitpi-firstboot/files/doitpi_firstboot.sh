@@ -55,7 +55,7 @@ PY
 # Aufruf: replace_in_files <suchmuster> <ersatz> <verzeichnis>
 # Regex-Gruppen: Zielpräfix, optionaler Restpfad, Abschlusszeichen.
 # Ausgabe: Pfade der tatsächlich geänderten Dateien auf stdout, eine pro Zeile.
-OLD_HOME_REGEX="(/home/pi)(/[^[:space:]]*)?([[:space:]]|['\"]|\\]|\\}|\\)|>|=|,|:|;|$)"
+OLD_HOME_REGEX="(/home/pi)(/[-[:alnum:]_./@+&]*)?([[:space:]]|['\"]|\\]|\\}|\\)|>|=|,|:|;|$)"
 
 escape_sed_replacement() {
     local value="$1"

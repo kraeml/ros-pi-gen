@@ -237,6 +237,7 @@ def test_firstboot_replaces_paths_without_prefix_collisions(tmp_path, firstboot_
         'quoted_double="/home/pi"\n'
         "child_slash=/home/pi/x/\n"
         "at_eol=/home/pi\n"
+        "adjacent=/home/pi:/home/pi\n"
         "other=/home/pilot\n"
         "pixel=/home/pixel\n"
         "backup=/home/pi.bak\n"
@@ -263,6 +264,7 @@ def test_firstboot_replaces_paths_without_prefix_collisions(tmp_path, firstboot_
     assert 'quoted_double="/home/robot"' in home_text
     assert "child_slash=/home/robot/x/" in home_text
     assert "at_eol=/home/robot" in home_text
+    assert "adjacent=/home/robot:/home/robot" in home_text
     assert "other=/home/pilot" in home_text
     assert "pixel=/home/pixel" in home_text
     assert "backup=/home/pi.bak" in home_text
@@ -278,12 +280,12 @@ def test_firstboot_replacement_escapes_ampersand_in_home_path(tmp_path, firstboo
     home = "/home/robot&lab"
     home_file = tmp_path / "fixture" / "home" / "robot&lab" / "setup.txt"
     home_file.parent.mkdir(parents=True)
-    home_file.write_text("venv=/home/pi/platformio-env\\nother=/home/pi-extra\\n")
+    home_file.write_text("venv=/home/pi/platformio-env\nother=/home/pi-extra\n")
 
     result, _ = _run_firstboot(tmp_path, _status(), firstboot_image, user_home=home)
     assert result.returncode == 0, result.stderr
     assert home_file.read_text() == (
-        "venv=/home/robot&lab/platformio-env\\nother=/home/pi-extra\\n"
+        "venv=/home/robot&lab/platformio-env\nother=/home/pi-extra\n"
     )
 
 
