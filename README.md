@@ -17,7 +17,7 @@ Verwende Raspberry Pi Imager **2.0.6 oder neuer**. Der Repository-Import wurde m
 4. Wähle die SD-Karte. Der Schreibvorgang löscht alle bisherigen Daten auf ihr.
 5. Im Imager-Wizard kannst du Hostname, Benutzername und Passwort festlegen sowie WLAN und SSH konfigurieren. Diese Einstellungen sind pro Gerät vorzunehmen. Verwende kein gemeinsames Standardpasswort.
 6. Starte das Schreiben und warte, bis Imager die Verifikation abgeschlossen hat. Wirf die Karte danach sicher aus.
-7. Stecke die Karte in den Pi und schalte ihn ein. Cloud-init wendet zunächst die Imager-Einstellungen an und richtet den gewählten Benutzer ein. Danach wartet der einmalige Firstboot-Dienst bis zu etwa zwei Minuten auf den erfolgreichen Abschluss der Cloud-init-Init-Stufe, passt gegebenenfalls Benutzer-, Gruppen- und Home-Pfade an und aktiviert code-server für den Benutzer. Erst nach erfolgreicher Einrichtung wird der Abschlussmarker gesetzt; bei Fehlern bleibt der Dienst für einen erneuten Versuch aktiv.
+7. Stecke die Karte in den Pi und schalte ihn ein. Cloud-init wendet zunächst die Imager-Einstellungen an und richtet den gewählten Benutzer ein. Der einmalige Firstboot-Dienst wartet anschließend bis zu etwa zwei Minuten auf den Abschluss der Cloud-init-Init-Stufe und ersetzt die Gruppenangabe `Group=pi` in systemd-Units durch die Primärgruppe des gewählten Benutzers. Ein Marker verhindert nach erfolgreichem Abschluss eine erneute Ausführung; bei Fehlern wird er nicht gesetzt.
 
 Eine lokale Image-Datei über **Use Custom** einzuspielen bietet für dieses Image nicht denselben Imager-Anpassungsablauf. Verwende das Repository oben, wenn du Hostname, Benutzer, WLAN oder SSH beim Schreiben konfigurieren möchtest.
 
