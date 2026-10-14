@@ -49,7 +49,7 @@ make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/
 
 Die konkrete URL muss vom Imager-Rechner erreichbar sein. Pakete validieren Manifestformat und -schema; Tests der Paketierung befinden sich in `tests/test_package_image.py`.
 
-`make lint` führt Python-Kompilierungsprüfungen, ShellCheck und das im Makefile festgelegte pytest-Subset aus. Für die vollständige Test-Suite `make test` verwenden. Einen Image-Build oder Hardware-/Imager-Test nur ausführen, wenn Umgebung und Zielgerät dafür geeignet sind.
+`make lint` führt Python-Kompilierungsprüfungen, ShellCheck und das im Makefile festgelegte pytest-Subset aus. Image-abhängige Tests gehören nicht dazu. Sie laufen separat gegen ein gebautes Image; die Befehle stehen in `tests/README.md`. Nenne im Ergebnis den Image-Dateinamen oder das Build-Datum und jede ausgelassene Prüfung. Für die vollständige Test-Suite `make test` verwenden. Einen Image-Build oder Hardware-/Imager-Test nur ausführen, wenn Umgebung und Zielgerät dafür geeignet sind.
 
 ## Varianten und Image-Inhalte
 
