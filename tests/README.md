@@ -17,6 +17,11 @@ python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
 ./run_tests.sh -k q5              # einzelner Test
 ./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vor dem Lauf löschen
 
+Die folgenden Image-Smokes aus `tests/` ausführen. Der zweite Befehl setzt mit
+`PIGEN_TEST_NO_BINFMT=1` voraus, dass arm64-binfmt bereits anderweitig verwaltet
+wird; andernfalls die Variable weglassen, damit pytest den Container-qemu-Entry
+selbst einrichtet und wieder entfernt.
+
 PIGEN_TEST_IMAGE=../deploy/image_2026-10-12-raspberrypi-trixie-custom-lite.img.xz \
   ../.venv/bin/python -m pytest -p no:cacheprovider test_image_files.py \
   -k test_image_nodered_unit_and_service_enabled -q
