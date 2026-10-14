@@ -17,6 +17,14 @@ python3 -m venv ../.venv && ../.venv/bin/pip install -r requirements.txt
 ./run_tests.sh -k q5              # einzelner Test
 ./run_tests.sh --clean-cache      # Test-Cache (tests/.work) vor dem Lauf löschen
 
+PIGEN_TEST_IMAGE=../deploy/image_2026-10-12-raspberrypi-trixie-custom-lite.img.xz \
+  ../.venv/bin/python -m pytest -p no:cacheprovider test_image_files.py \
+  -k test_image_nodered_unit_and_service_enabled -q
+
+PIGEN_TEST_IMAGE=../deploy/image_2026-10-12-raspberrypi-trixie-custom-lite.img.xz \
+PIGEN_TEST_NO_BINFMT=1 ../.venv/bin/python -m pytest -p no:cacheprovider \
+  test_q2_q9_smoke.py -k dev_services_enabled_in_image -q
+
 # Hardware-Lauf (Gruppe Q final am echten Pi, read-only; Q6/Q8 zeigen als robot SKIP):
 ssh robot@<ip> 'bash -s' < tests/tools/pi-smoke.sh
 
