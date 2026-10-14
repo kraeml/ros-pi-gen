@@ -101,9 +101,9 @@ VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 PIGEN_DOCKER_OPTS := --volume $(STAGE_DIR):/pi-gen/stage-custom:ro \
                      --volume $(WORK_DIR):/pi-gen/work
 
-# shellcheck-Dateisatz: Build-/Setup-Skripte plus Firstboot-Testharness.
+# shellcheck-Dateisatz: Build- und Setup-Skripte der Stage plus Wrapper.
 # Nicht gescannt: config (sourced von pi-gen mit set -u; die Variablen sind
-# pi-gen-seitig belegt — SC2034/SC2148-Mehrheit), Python-Testharness und vendor'te
+# pi-gen-seitig belegt — SC2034/SC2148-Mehrheit) und vendor'te
 # AccessPopup-Skripte (unverändert, siehe
 # stage-custom/07-accesspopup/files/VENDORED.md).
 SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) \
