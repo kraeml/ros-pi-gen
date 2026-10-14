@@ -115,6 +115,35 @@ def test_image_ansible_roles_ausgerollt(pack):
     assert not missing, f"Ansible-Rollen-Dateien fehlen im Image: {missing}"
 
 
+def test_image_nodered_unit_and_service_enabled(pack):
+    override_path = "/etc/systemd/system/nodered.service.d/override.conf"
+    assert imageio.debugfs_exists(pack.root_img, override_path), (
+        f"Node-RED systemd-Override fehlt: {override_path}"
+    )
+    override = imageio.debugfs_cat(pack.root_img, override_path)
+    assert "User=pi" in override
+    assert "Group=pi" in override
+    assert "WorkingDirectory=/home/pi" in override
+    assert imageio.debugfs_exists(
+        pack.root_img,
+        "/etc/systemd/system/multi-user.target.wants/nodered.service",
+    ), "Node-RED-Systemdienst ist nicht aktiviert"
+    assert imageio.debugfs_exists(pack.root_img, "/etc/nodered-build-versions")
+    assert imageio.debugfs_exists(pack.root_img, "/usr/bin/node-red")
+
+
+def test_image_code_server_deferred_activation_and_unit(pack):
+    base = _ansible_home(pack)
+    username = base.removesuffix("/pi-base-ansible").removeprefix("/home/")
+    assert imageio.debugfs_exists(
+        pack.root_img,
+        f"/etc/systemd/system/multi-user.target.wants/code-server@{username}.service",
+    ), "code-server-Service-Link fehlt für den Build-Benutzer"
+    unit = imageio.debugfs_cat(pack.root_img, "/lib/systemd/system/code-server@.service")
+    assert "User=%i" in unit
+    assert "ExecStart=/usr/bin/code-server" in unit
+
+
 def test_image_ansible_user_services_expected_config(pack):
     base = _ansible_home(pack)
     user_home = base.removesuffix("/pi-base-ansible")
@@ -136,7 +165,7 @@ def test_image_ansible_user_services_expected_config(pack):
     assert imageio.debugfs_exists(
         pack.root_img,
         f"/etc/systemd/system/multi-user.target.wants/code-server@{username}.service",
-    ), "code-server-Systemdienst ist nicht aktiviert"
+    ), "code-server-Service-Link fehlt im Image"
     assert imageio.debugfs_exists(pack.root_img, "/etc/udev/rules.d/99-platformio-udev.rules")
 
     config_path = f"{user_home}/.config/code-server/config.yaml"

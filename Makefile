@@ -101,9 +101,9 @@ VARIANT_STAGES  := 06-variant-headless 06-variant-desktop
 PIGEN_DOCKER_OPTS := --volume $(STAGE_DIR):/pi-gen/stage-custom:ro \
                      --volume $(WORK_DIR):/pi-gen/work
 
-# shellcheck-Dateisatz: build- und setup-Skripte der Stage + Wrapper.
+# shellcheck-Dateisatz: Build- und Setup-Skripte der Stage plus Wrapper.
 # Nicht gescannt: config (sourced von pi-gen mit set -u; die Variablen sind
-# pi-gen-seitig belegt — SC2034/SC2148-Mehrheit) und die vendor'ten
+# pi-gen-seitig belegt — SC2034/SC2148-Mehrheit) und vendor'te
 # AccessPopup-Skripte (unverändert, siehe
 # stage-custom/07-accesspopup/files/VENDORED.md).
 SHELL_FILES := $(shell find $(STAGE_DIR) -maxdepth 2 -name '*-run.sh' 2>/dev/null | sort) \
@@ -122,7 +122,7 @@ help:
 	@echo "ros-pi-gen — Thin-Wrapper (Details: README.md, GitHub-Image-Workflow.md)"
 	@echo
 	@echo "  make venv                     venv + Testabhängigkeiten anlegen"
-	@echo "  make lint                     shellcheck (Stage + Wrapper) — schnelles Subset (Overlay-Tests + hostname-ssid), kein Volltestlauf"
+	@echo "  make lint                     shellcheck (Stage + Wrapper) — schnelles Subset (Overlay-Tests + hostname-ssid + Firstboot), kein Volltestlauf"
 	@echo "  make setup                    pi-gen vorbereiten (MODE=stage-custom|overlay, VARIANT=…)"
 	@echo "  make build                    Image bauen (ENGINE=docker|native, VARIANT=…,"
 	@echo "                                CONTINUE=1 Weiterbau im Container (überspringt Stale-Guard),"
@@ -167,7 +167,7 @@ venv: $(VENV)/.deps.stamp
 lint: venv guard-pigen
 	@$(VENV)/bin/python -m compileall -q $(REPO_ROOT)/tools/package_image.py $(REPO_ROOT)/tools/merge_test_packages.py $(REPO_ROOT)/tools/publish_s3.py $(REPO_ROOT)/tools/github_release.py $(REPO_ROOT)/tools/release_preflight.py $(REPO_ROOT)/tools/release.py
 	@shellcheck $(SHELL_FILES) $(REPO_ROOT)/tools/package-image.sh $(REPO_ROOT)/tools/publish-s3.sh
-	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_nft_helper.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py tests/test_release_preflight.py tests/test_release.py -q
+	$(VENV)/bin/python -m pytest tests/test_overlay_files.py tests/test_ansible_roles.py tests/test_hostname_ssid.py tests/test_doitpi_firstboot.py tests/test_nft_helper.py tests/test_package_image.py tests/test_publish_s3.py tests/test_github_release.py tests/test_release_preflight.py tests/test_release.py -q
 
 # --- setup ------------------------------------------------------------------
 # Entfernt Overlay-Reste aus pi-gen (Rückstände eines MODE=overlay-Laufs

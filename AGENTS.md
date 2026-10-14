@@ -19,6 +19,7 @@ Das Root-`Makefile` ist der zentrale Einstiegspunkt. GitHub Actions und andere R
 ## Arbeitsweise und Codekonventionen
 
 - Vor Änderungen die betroffenen Dateien und benachbarten Tests lesen. Bestehende Architektur, Abhängigkeiten, Dateinamen, Formatierung und Fehlerbehandlung fortführen.
+- Projektbezogene Änderungen auf einem git-flow-Feature-Branch bearbeiten; nicht direkt auf `develop` oder `main` arbeiten. Freigabe-Gates bleiben zusätzlich an `RELEASE-GATES.md` gebunden.
 - Build-, Manifest- und Veröffentlichungslogik in versionierten Skripten bzw. Make-Targets halten. Workflow-Dateien sollen möglichst nur Checkout, Runner-Setup, Secrets-Injektion und Aufrufe dieser Targets enthalten.
 - Python-Tools und Tests orientieren sich an den vorhandenen Modulen und pytest-Mustern. Shellskripte mit sicherem Fehlerverhalten (`set -euo pipefail`, wo passend) schreiben und ShellCheck-Konventionen beachten.
 - Keine Kommentare hinzufügen, außer wenn ausdrücklich verlangt. Keine Secrets, Passwörter, privaten Schlüssel oder lokalen Zugangsdaten in Repository-Dateien oder Logs aufnehmen.
@@ -48,7 +49,7 @@ make package VARIANT=headless BASE_URL=http://127.0.0.1:8000/
 
 Die konkrete URL muss vom Imager-Rechner erreichbar sein. Pakete validieren Manifestformat und -schema; Tests der Paketierung befinden sich in `tests/test_package_image.py`.
 
-`make lint` führt Python-Kompilierungsprüfungen, ShellCheck und das im Makefile festgelegte pytest-Subset aus. Für die vollständige Test-Suite `make test` verwenden. Einen Image-Build oder Hardware-/Imager-Test nur ausführen, wenn Umgebung und Zielgerät dafür geeignet sind.
+`make lint` führt Python-Kompilierungsprüfungen, ShellCheck und das im Makefile festgelegte pytest-Subset aus. Image-abhängige Tests gehören nicht dazu. Sie laufen separat gegen ein gebautes Image; die Befehle stehen in `tests/README.md`. Nenne im Ergebnis den Image-Dateinamen oder das Build-Datum und jede ausgelassene Prüfung. Für die vollständige Test-Suite `make test` verwenden. Einen Image-Build oder Hardware-/Imager-Test nur ausführen, wenn Umgebung und Zielgerät dafür geeignet sind.
 
 ## Varianten und Image-Inhalte
 

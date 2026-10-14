@@ -4,7 +4,7 @@ Roboter-OS ist ein Debian-Trixie-System für Raspberry Pi 3, 4 und 5 (arm64). Da
 
 ## Installation mit Raspberry Pi Imager
 
-Verwende Raspberry Pi Imager **2.0.6 oder neuer**. Der Repository-Import wurde mit Version 2.0.11.1 getestet. Das aktuelle Produktionsimage ist `2026.10.2`.
+Verwende Raspberry Pi Imager **2.0.6 oder neuer**. Der Repository-Import wurde mit Version 2.0.11.1 getestet. Das Produktionsimage ist `2026.10.17`.
 
 1. Öffne Raspberry Pi Imager und wähle Raspberry Pi 3, 4 oder 5.
 2. Öffne die Betriebssystem-Auswahl und füge ein eigenes OS-Repository hinzu. Trage diese URL ein:
@@ -13,11 +13,11 @@ Verwende Raspberry Pi Imager **2.0.6 oder neuer**. Der Repository-Import wurde m
    https://github.com/kraeml/ros-pi-gen/releases/latest/download/headless-os-list.json
    ```
 
-3. Wähle **Roboter-OS 2026.10.2 (Headless)**.
+3. Wähle **Roboter-OS 2026.10.17 (Headless)**.
 4. Wähle die SD-Karte. Der Schreibvorgang löscht alle bisherigen Daten auf ihr.
 5. Im Imager-Wizard kannst du Hostname, Benutzername und Passwort festlegen sowie WLAN und SSH konfigurieren. Diese Einstellungen sind pro Gerät vorzunehmen. Verwende kein gemeinsames Standardpasswort.
 6. Starte das Schreiben und warte, bis Imager die Verifikation abgeschlossen hat. Wirf die Karte danach sicher aus.
-7. Stecke die Karte in den Pi und schalte ihn ein. Beim ersten Start werden die Imager-Einstellungen angewendet.
+7. Stecke die Karte in den Pi und schalte ihn ein. Cloud-init wendet zunächst die Imager-Einstellungen an und richtet den gewählten Benutzer ein. Der einmalige Firstboot-Dienst wartet anschließend bis zu etwa zwei Minuten auf den Abschluss der Cloud-init-Init-Stufe und ersetzt die Gruppenangabe `Group=pi` in systemd-Units durch die Primärgruppe des gewählten Benutzers. Ein Marker verhindert nach erfolgreichem Abschluss eine erneute Ausführung; bei Fehlern wird er nicht gesetzt.
 
 Eine lokale Image-Datei über **Use Custom** einzuspielen bietet für dieses Image nicht denselben Imager-Anpassungsablauf. Verwende das Repository oben, wenn du Hostname, Benutzer, WLAN oder SSH beim Schreiben konfigurieren möchtest.
 
